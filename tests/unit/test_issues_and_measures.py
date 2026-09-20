@@ -78,3 +78,16 @@ def test_every_issue_code_has_one_enforced_level():
             message_uk="Структура не підтримується",
             sources=(),
         )
+
+
+def test_global_internal_issue_does_not_require_fake_cell_provenance():
+    issue = Issue(
+        issue_id="I-INTERNAL",
+        code=IssueCode.INTERNAL_ERROR,
+        level=IssueLevel.INTERNAL,
+        message_uk="Внутрішня помилка",
+        sources=(),
+        details=(("diagnostic_ref", "abc123"),),
+    )
+
+    assert issue.level is IssueLevel.INTERNAL

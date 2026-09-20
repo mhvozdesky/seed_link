@@ -26,6 +26,8 @@ class IssueCode(StrEnum):
     SCHEMA_MISMATCH = "SCHEMA_MISMATCH"
     ROLE_MISMATCH = "ROLE_MISMATCH"
     UNSUPPORTED_CELL_VALUE = "UNSUPPORTED_CELL_VALUE"
+    NUMERIC_ID_RISK = "NUMERIC_ID_RISK"
+    CAMPAIGN_MEMBER_ID_INVALID = "CAMPAIGN_MEMBER_ID_INVALID"
     DUPLICATE_ID = "DUPLICATE_ID"
     DUPLICATE_UNCERTAIN = "DUPLICATE_UNCERTAIN"
     CONFLICTING_ID_DATA = "CONFLICTING_ID_DATA"
@@ -41,6 +43,7 @@ class IssueCode(StrEnum):
     MULTIPLE_TAX_IDS = "MULTIPLE_TAX_IDS"
     DATE_INVALID = "DATE_INVALID"
     DATE_CONFLICT = "DATE_CONFLICT"
+    INTERNAL_ERROR = "INTERNAL_ERROR"
     CONTROL_TOTAL_MISMATCH = "CONTROL_TOTAL_MISMATCH"
     EXPORT_IO_FAILED = "EXPORT_IO_FAILED"
 
@@ -54,6 +57,8 @@ ISSUE_LEVEL_BY_CODE: Mapping[IssueCode, IssueLevel] = MappingProxyType(
         IssueCode.SCHEMA_MISMATCH: IssueLevel.IMPORT_BLOCKING,
         IssueCode.ROLE_MISMATCH: IssueLevel.IMPORT_BLOCKING,
         IssueCode.UNSUPPORTED_CELL_VALUE: IssueLevel.RECORD,
+        IssueCode.NUMERIC_ID_RISK: IssueLevel.RECORD,
+        IssueCode.CAMPAIGN_MEMBER_ID_INVALID: IssueLevel.RECORD,
         IssueCode.DUPLICATE_ID: IssueLevel.RECORD,
         IssueCode.DUPLICATE_UNCERTAIN: IssueLevel.RECORD,
         IssueCode.CONFLICTING_ID_DATA: IssueLevel.RECORD,
@@ -69,6 +74,7 @@ ISSUE_LEVEL_BY_CODE: Mapping[IssueCode, IssueLevel] = MappingProxyType(
         IssueCode.MULTIPLE_TAX_IDS: IssueLevel.RECORD,
         IssueCode.DATE_INVALID: IssueLevel.RECORD,
         IssueCode.DATE_CONFLICT: IssueLevel.RECORD,
+        IssueCode.INTERNAL_ERROR: IssueLevel.INTERNAL,
         IssueCode.CONTROL_TOTAL_MISMATCH: IssueLevel.INTERNAL,
         IssueCode.EXPORT_IO_FAILED: IssueLevel.EXPORT,
     }
@@ -104,8 +110,9 @@ class Issue:
         detail_names = [name for name, _ in self.details]
         if len(set(detail_names)) != len(detail_names):
             raise ValueError("issue detail names must be unique")
-        if expected_level is not IssueLevel.IMPORT_BLOCKING and not self.sources:
-            raise ValueError("non-import issue must have source provenance")
+        if expected_level in {IssueLevel.RECORD, IssueLevel.UNKNOWN_NUMERIC}:
+            if not self.sources:
+                raise ValueError("record and numeric issues must have source provenance")
 
     @property
     def is_resolved(self) -> bool:
