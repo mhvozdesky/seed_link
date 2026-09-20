@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from hashlib import sha256
 import json
 from pathlib import Path
 
 import pytest
 
+from seedlink.application import analyze_links
 from seedlink.domain.issues import IssueCode
 from seedlink.domain.provenance import InputRole
 from seedlink.input_xlsx import import_workbooks
@@ -62,3 +64,42 @@ def test_local_real_workbooks_match_independent_manifest():
         record.campaign_member_id is None
         for record in result.workbook(InputRole.R3).records
     )
+
+
+def test_local_real_workbooks_produce_three_auditable_automatic_vouchers():
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    paths = {
+        InputRole(item["role"]): (PROJECT / item["path_from_project"]).resolve()
+        for item in manifest["sources"]
+    }
+    if not all(path.is_file() for path in paths.values()):
+        pytest.skip("Локальний приватний комплект XLSX відсутній")
+
+    matching = analyze_links(import_workbooks(paths))
+    accepted_numbers = {
+        voucher.full_number
+        for voucher in matching.vouchers
+        if voucher.key in matching.accepted_voucher_keys
+    }
+
+    assert accepted_numbers == {
+        item["full_number"] for item in manifest["expected"]["matched_vouchers"]
+    }
+    assert len(matching.accepted_links) == 3
+    accepted_lines = [
+        line
+        for line in matching.product_lines
+        if line.voucher_key in matching.accepted_voucher_keys
+    ]
+    assert len(accepted_lines) == 5
+    assert sum(
+        (line.quantity for line in accepted_lines if line.quantity is not None),
+        Decimal(0),
+    ) == Decimal(manifest["expected"]["known_quantity"])
+    assert len(matching.participants) == 9
+    assert len(matching.activities) == 3
+    assert all(link.participant_key for link in matching.participant_links)
+    assert {
+        issue.code for issue in matching.issues
+    } == {IssueCode.DATE_INVALID, IssueCode.VOUCHER_NOT_FOUND}
+    assert all(link.evidence for link in matching.accepted_links)

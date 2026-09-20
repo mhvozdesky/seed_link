@@ -5,10 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from html.parser import HTMLParser
+import re
 from urllib.parse import unquote
 
 from seedlink.domain.issues import IssueCode
 from seedlink.domain.provenance import SourceCell, SourceRecord, SourceValueKind
+from seedlink.domain.salesforce_ids import find_salesforce_ids
 from seedlink.input_xlsx._parsing import (
     ParseProblem,
     collect,
@@ -16,7 +18,6 @@ from seedlink.input_xlsx._parsing import (
     identifier_value,
     text_value,
 )
-from seedlink.input_xlsx.salesforce_ids import find_salesforce_ids
 
 
 class _HrefCollector(HTMLParser):
@@ -38,6 +39,24 @@ class _HrefCollector(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         self.text_parts.append(data)
+
+
+_CAMPAIGN_MEMBER_PATH = re.compile(
+    r"(?:^|/)CampaignMember/([A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?)(?:/|$)",
+    re.IGNORECASE,
+)
+
+
+def _supported_campaign_member_ids(candidate: str) -> tuple[str, ...]:
+    decoded = unquote(candidate)
+    explicit = _CAMPAIGN_MEMBER_PATH.search(decoded)
+    if explicit is not None:
+        return find_salesforce_ids(explicit.group(1))
+    return tuple(
+        value
+        for value in find_salesforce_ids(decoded)
+        if value.casefold().startswith("00v")
+    )
 
 
 def _campaign_member_ids(
@@ -78,7 +97,7 @@ def _campaign_member_ids(
 
     result: list[str] = []
     for candidate in candidates:
-        found = find_salesforce_ids(unquote(candidate))
+        found = _supported_campaign_member_ids(candidate)
         if found:
             invalid_reference_seen = False
         for value in found:

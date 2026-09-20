@@ -57,6 +57,19 @@ class VoucherMatchMethod(StrEnum):
     MANUAL = "manual"
 
 
+@dataclass(frozen=True, slots=True)
+class VoucherMatchEvidence:
+    """The matching rule used for one source mention in an accepted link."""
+
+    mention_key: str
+    survey_key: str
+    method: VoucherMatchMethod
+
+    def __post_init__(self) -> None:
+        _required(self.mention_key, "mention_key")
+        _required(self.survey_key, "survey_key")
+
+
 class DecisionTarget(StrEnum):
     VOUCHER_CASE = "voucher_case"
     SURVEY_PARTICIPANT = "survey_participant"
@@ -207,6 +220,7 @@ class Voucher:
     normalized_number: str
     product_line_keys: tuple[str, ...]
     sources: tuple[SourceCell, ...]
+    number_variants: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _required(self.key, "key")
@@ -215,13 +229,20 @@ class Voucher:
         _unique(self.product_line_keys, "product_line_keys")
         if not self.sources or not _sources_have_role(self.sources, InputRole.R2):
             raise ValueError("voucher must have R2 source provenance")
+        if not self.number_variants:
+            object.__setattr__(self, "number_variants", (self.full_number,))
+        _unique(self.number_variants, "number_variants")
+        if self.full_number not in self.number_variants:
+            raise ValueError("full_number must be one of number_variants")
+        for variant in self.number_variants:
+            _required(variant, "number_variants")
 
 
 @dataclass(frozen=True, slots=True)
 class ProductLine:
     key: str
     product_id: str | None
-    voucher_key: str
+    voucher_key: str | None
     quantity: Decimal | None
     species_group: str | None
     hybrid: str | None
@@ -232,7 +253,8 @@ class ProductLine:
 
     def __post_init__(self) -> None:
         _required(self.key, "key")
-        _required(self.voucher_key, "voucher_key")
+        if self.voucher_key is not None:
+            _required(self.voucher_key, "voucher_key")
         if self.quantity is not None:
             if not self.quantity.is_finite() or self.quantity < 0:
                 raise ValueError("known product quantity must be finite and non-negative")
@@ -252,6 +274,7 @@ class AcceptedLink:
     method: VoucherMatchMethod
     sources: tuple[SourceCell, ...]
     decision_id: str | None = None
+    evidence: tuple[VoucherMatchEvidence, ...] = ()
 
     def __post_init__(self) -> None:
         _required(self.key, "key")
@@ -263,6 +286,15 @@ class AcceptedLink:
             raise ValueError("accepted link must preserve its evidence")
         if self.method is VoucherMatchMethod.MANUAL and not self.decision_id:
             raise ValueError("manual voucher link must reference a decision")
+        if self.evidence:
+            evidence_mentions = tuple(item.mention_key for item in self.evidence)
+            _unique(evidence_mentions, "accepted link evidence mention keys")
+            if set(evidence_mentions) != set(self.mention_keys):
+                raise ValueError(
+                    "accepted link evidence must describe every mention exactly once"
+                )
+            if any(item.survey_key not in self.survey_keys for item in self.evidence):
+                raise ValueError("accepted link evidence must reference its surveys")
 
 
 @dataclass(frozen=True, slots=True)

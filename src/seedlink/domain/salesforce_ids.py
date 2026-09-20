@@ -1,4 +1,4 @@
-"""Exact Salesforce 15/18-character ID conversion used by person matching."""
+"""Exact Salesforce 15/18-character ID normalization for person matching."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def salesforce_id_key(value: str) -> str:
 
 
 def find_salesforce_ids(value: str) -> tuple[str, ...]:
-    """Find ID-shaped tokens without assuming an object-prefix such as ``00v``."""
+    """Find ID-shaped tokens without assuming an object prefix such as ``00v``."""
 
     result: list[str] = []
     for match in _ID_TOKEN.finditer(value):

@@ -7,6 +7,7 @@ from datetime import datetime
 
 from seedlink.domain.issues import IssueCode
 from seedlink.domain.provenance import SourceRecord
+from seedlink.domain.salesforce_ids import salesforce_id_18
 from seedlink.input_xlsx._parsing import (
     ParseProblem,
     collect,
@@ -14,7 +15,6 @@ from seedlink.input_xlsx._parsing import (
     identifier_value,
     text_value,
 )
-from seedlink.input_xlsx.salesforce_ids import salesforce_id_18
 
 
 @dataclass(frozen=True, slots=True)

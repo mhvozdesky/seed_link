@@ -36,9 +36,9 @@ from seedlink.domain.provenance import (
     SourceRecord,
     SourceValueKind,
 )
+from seedlink.domain.salesforce_ids import salesforce_id_key
 from seedlink.input_xlsx import r1, r2, r3, r4
 from seedlink.input_xlsx._parsing import ParseProblem
-from seedlink.input_xlsx.salesforce_ids import salesforce_id_key
 from seedlink.input_xlsx.schemas import SCHEMAS, SchemaDefinition, schema_for
 
 

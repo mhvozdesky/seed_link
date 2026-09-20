@@ -9,12 +9,11 @@ from openpyxl import Workbook
 
 from seedlink.domain.issues import IssueCode
 from seedlink.domain.provenance import InputRole, SourceValueKind
+from seedlink.domain.salesforce_ids import salesforce_id_18, salesforce_id_key
 from seedlink.input_xlsx import (
     RecordGroupStatus,
     import_workbooks,
     read_workbook,
-    salesforce_id_18,
-    salesforce_id_key,
 )
 from seedlink.input_xlsx import workbook_reader
 from seedlink.input_xlsx.schemas import schema_for
@@ -228,6 +227,16 @@ def test_text_and_native_campaign_member_links_are_inertly_extracted(tmp_path):
                 "Campaigm Member": '<a href="/record/no-id">зламано</a>',
             },
         ),
+        _row(
+            InputRole.R1,
+            **{
+                "Record Nr": "SR-5",
+                "Campaigm Member": (
+                    '<a href="/lightning/r/CampaignMember/'
+                    '701AbCdEfGhIjKl/view">контекстний ID</a>'
+                ),
+            },
+        ),
     ]
     _write_workbook(path, InputRole.R1, rows)
     from openpyxl import load_workbook
@@ -246,8 +255,9 @@ def test_text_and_native_campaign_member_links_are_inertly_extracted(tmp_path):
     assert result.is_accepted
     assert result.records[0].campaign_member_ids == ("00vABCDEF123456XYZ",)
     assert result.records[1].campaign_member_ids == ("00v123456789ABCDEF",)
-    assert result.records[2].campaign_member_ids == ("701AbCdEfGhIjKlIVK",)
+    assert result.records[2].campaign_member_ids == ()
     assert result.records[3].campaign_member_ids == ()
+    assert result.records[4].campaign_member_ids == ("701AbCdEfGhIjKlIVK",)
     assert IssueCode.CAMPAIGN_MEMBER_ID_INVALID in {
         issue.code for issue in result.issues
     }

@@ -2,6 +2,7 @@
 
 from seedlink.domain.issues import ISSUE_LEVEL_BY_CODE, Issue, IssueCode, IssueLevel
 from seedlink.domain.measures import Measure, MeasureStatus
+from seedlink.domain.identity import PersonMatchingResult, match_participants
 from seedlink.domain.models import (
     AcceptedLink,
     Activity,
@@ -18,6 +19,7 @@ from seedlink.domain.models import (
     ReportResult,
     Survey,
     Voucher,
+    VoucherMatchEvidence,
     VoucherMatchMethod,
     VoucherMention,
 )
@@ -27,6 +29,14 @@ from seedlink.domain.provenance import (
     InputSource,
     SourceCell,
     SourceRecord,
+)
+from seedlink.domain.salesforce_ids import salesforce_id_18, salesforce_id_key
+from seedlink.domain.voucher_matching import (
+    VoucherMatchingResult,
+    VoucherNumberKind,
+    VoucherNumberParts,
+    match_vouchers,
+    parse_voucher_number,
 )
 
 __all__ = [
@@ -50,12 +60,22 @@ __all__ = [
     "ParticipantLink",
     "ParticipantLinkSubject",
     "PersonMatchMethod",
+    "PersonMatchingResult",
     "ProductLine",
     "ReportResult",
     "SourceCell",
     "SourceRecord",
     "Survey",
     "Voucher",
+    "VoucherMatchingResult",
+    "VoucherMatchEvidence",
     "VoucherMatchMethod",
     "VoucherMention",
+    "VoucherNumberKind",
+    "VoucherNumberParts",
+    "match_participants",
+    "match_vouchers",
+    "parse_voucher_number",
+    "salesforce_id_18",
+    "salesforce_id_key",
 ]
