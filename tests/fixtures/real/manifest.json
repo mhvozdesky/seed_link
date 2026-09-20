@@ -1,0 +1,154 @@
+{
+  "fixture_version": 1,
+  "description_uk": "Досліджений малий комплект Salesforce; локальний і не для дистрибутива",
+  "sources": [
+    {
+      "role": "R1",
+      "path_from_project": "../common data/info folder/report1789636646082.xls.xlsx",
+      "file_name": "report1789636646082.xls.xlsx",
+      "sha256": "444e03b7c1602497c1fb34d66177e1e1129e4ffe7eafc6d160bbe81ce98ea51d",
+      "sheet_name": "report1789636646082",
+      "sheet_count": 1,
+      "data_rows": 3,
+      "columns": [
+        "Record Nr",
+        "Created Date",
+        "Created By: Full Name",
+        "Campaigm Member",
+        "Lead: Full Name",
+        "Account: 18-digits ID",
+        "Account: Tax ID 1",
+        "Account: Account Name",
+        "Account: Billing Location",
+        "First Name",
+        "Last Name",
+        "Mobile",
+        "Time Taken",
+        "Email",
+        "Survey Response ID",
+        "Question",
+        "Answer",
+        "Correct Answer",
+        "Answer (Long Text)",
+        "City",
+        "Address"
+      ]
+    },
+    {
+      "role": "R2",
+      "path_from_project": "../common data/info folder/report1789636710099.xls.xlsx",
+      "file_name": "report1789636710099.xls.xlsx",
+      "sha256": "1aeaeb8125631d46e55a9982d63bfa6d2ff9b3d4949d427beac3dcc1eb191bb6",
+      "sheet_name": "report1789636710099",
+      "sheet_count": 1,
+      "data_rows": 117,
+      "columns": [
+        "Opportunity ID",
+        "Opportunity Product Id 18",
+        "Tax ID 1",
+        "Account Name",
+        "Parent Account",
+        "Parent Account ID",
+        "Data Source",
+        "INTL Account Name",
+        "Seeds KAM",
+        "Next Step",
+        "Voucher Number",
+        "Local Description",
+        "Parent Product Local Description",
+        "Species group",
+        "Current Year Planned Quantity",
+        "Planned Quantity for IBP Integration",
+        "Opportunity Product: Created Date",
+        "Status",
+        "Loyalty Comment",
+        "Supplier",
+        "Line Description",
+        "Billing State/Province",
+        "Billing Location",
+        "Opportunity Owner: Manager",
+        "Supplied from Channel Stock",
+        "Created Date"
+      ]
+    },
+    {
+      "role": "R3",
+      "path_from_project": "../common data/info folder/report1789636887663.xls.xlsx",
+      "file_name": "report1789636887663.xls.xlsx",
+      "sha256": "921359309ce68b7cc9c74c03607089e1d6301a3b5b61e2b210d054ffc60365b0",
+      "sheet_name": "report1789636887663",
+      "sheet_count": 1,
+      "data_rows": 9,
+      "columns": [
+        "Member Status",
+        "Member Type",
+        "First Name",
+        "Last Name",
+        "Email",
+        "Campaign Member Id 18",
+        "Member First Associated Date"
+      ]
+    },
+    {
+      "role": "R4",
+      "path_from_project": "../common data/info folder/report1789636370611.xls.xlsx",
+      "file_name": "report1789636370611.xls.xlsx",
+      "sha256": "aa283a589e6548d48ee93cf44c185a0a42eea9e176d11b4169507dfb404e8557",
+      "sheet_name": "report1789636370611",
+      "sheet_count": 1,
+      "data_rows": 3,
+      "columns": [
+        "Completed Date/Time",
+        "Account ID",
+        "Activity ID",
+        "Company / Account",
+        "Created Date",
+        "Due Date",
+        "Name",
+        "Subject",
+        "Activity Type",
+        "Results",
+        "Objective / Initiative",
+        "Notes",
+        "Assigned",
+        "Related To"
+      ]
+    }
+  ],
+  "expected": {
+    "row_counts": {"R1": 3, "R2": 117, "R3": 9, "R4": 3},
+    "member_types": {"Lead": 8, "Contact": 1},
+    "r3_nonempty_campaign_member_ids": 0,
+    "matched_vouchers": [
+      {
+        "full_number": "SE-2777788899/1/ТОВ АГРОРОСЬ",
+        "r2_excel_rows": [36],
+        "quantity": "56",
+        "sunflower": "0",
+        "maize": "56"
+      },
+      {
+        "full_number": "SE-2777788899-безкоштовні мішки",
+        "r2_excel_rows": [40],
+        "quantity": "10",
+        "sunflower": "0",
+        "maize": "10"
+      },
+      {
+        "full_number": "SE-2777788897-безкоштовні мішки",
+        "r2_excel_rows": [65, 69, 73],
+        "quantity": "40",
+        "sunflower": "19",
+        "maize": "21",
+        "client_quantity_parts": ["7", "33"]
+      }
+    ],
+    "unique_full_vouchers": 3,
+    "unique_numeric_blocks": 2,
+    "unique_tax_ids": 3,
+    "known_quantity": "106",
+    "sunflower_quantity": "19",
+    "maize_quantity": "87",
+    "unmatched_correct_answer_does_not_remove_known_quantity": true
+  }
+}

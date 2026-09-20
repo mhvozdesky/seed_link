@@ -1,0 +1,61 @@
+"""Public domain vocabulary; this package deliberately has no Qt dependency."""
+
+from seedlink.domain.issues import ISSUE_LEVEL_BY_CODE, Issue, IssueCode, IssueLevel
+from seedlink.domain.measures import Measure, MeasureStatus
+from seedlink.domain.models import (
+    AcceptedLink,
+    Activity,
+    Client,
+    DecisionAction,
+    DecisionTarget,
+    LeadRef,
+    ManualDecision,
+    Participant,
+    ParticipantLink,
+    ParticipantLinkSubject,
+    PersonMatchMethod,
+    ProductLine,
+    ReportResult,
+    Survey,
+    Voucher,
+    VoucherMatchMethod,
+    VoucherMention,
+)
+from seedlink.domain.provenance import (
+    InputRole,
+    InputSnapshot,
+    InputSource,
+    SourceCell,
+    SourceRecord,
+)
+
+__all__ = [
+    "AcceptedLink",
+    "Activity",
+    "Client",
+    "DecisionAction",
+    "DecisionTarget",
+    "InputRole",
+    "InputSnapshot",
+    "InputSource",
+    "ISSUE_LEVEL_BY_CODE",
+    "Issue",
+    "IssueCode",
+    "IssueLevel",
+    "LeadRef",
+    "ManualDecision",
+    "Measure",
+    "MeasureStatus",
+    "Participant",
+    "ParticipantLink",
+    "ParticipantLinkSubject",
+    "PersonMatchMethod",
+    "ProductLine",
+    "ReportResult",
+    "SourceCell",
+    "SourceRecord",
+    "Survey",
+    "Voucher",
+    "VoucherMatchMethod",
+    "VoucherMention",
+]

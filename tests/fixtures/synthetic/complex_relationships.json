@@ -1,0 +1,67 @@
+{
+  "fixture_version": 1,
+  "description_uk": "Анонімний ручний сценарій складних зв’язків; не створений виробничим алгоритмом",
+  "participants": [
+    {"key": "P-001", "campaign_member_id": "CM-001", "full_name": "Учасник Один", "member_type": "Lead"},
+    {"key": "P-002", "campaign_member_id": "CM-002", "full_name": "Спільне Ім'я", "member_type": "Lead"},
+    {"key": "P-003", "campaign_member_id": "CM-003", "full_name": "Спільне Ім'я", "member_type": "Contact"}
+  ],
+  "surveys": [
+    {
+      "key": "S-001",
+      "lead_ref_key": "L-001",
+      "candidate_name": "  УЧАСНИК   ОДИН ",
+      "answer_cells": [
+        {"field": "Answer", "text": "Короткий номер: SE-00001234"},
+        {"field": "Answer (Long Text)", "text": "Повтор SE–00001234"}
+      ]
+    },
+    {
+      "key": "S-002",
+      "lead_ref_key": "L-002",
+      "candidate_name": "Спільне Ім'я",
+      "answer_cells": [
+        {"field": "Answer", "text": "SE-00005678/1/АГРО"},
+        {"field": "Answer (Long Text)", "text": "XY-00005678/1/АГРО"}
+      ]
+    },
+    {
+      "key": "S-003",
+      "lead_ref_key": "L-004",
+      "candidate_name": "Особа Поза Базою",
+      "answer_cells": [
+        {"field": "Correct Answer", "text": "ZZ-99999999"},
+        {"field": "Answer (Long Text)", "text": "SE-00005678/1/АГРО"}
+      ]
+    }
+  ],
+  "vouchers": [
+    {"key": "V-001", "full_number": "SE-00001234/1/ДИСТРИБ'ЮТОР А", "product_line_keys": ["PL-001"]},
+    {"key": "V-002", "full_number": "SE-00001234-безкоштовні мішки", "product_line_keys": ["PL-002"]},
+    {"key": "V-003", "full_number": "SE-00005678/1/АГРО", "product_line_keys": ["PL-003", "PL-004"]},
+    {"key": "V-004", "full_number": "XY-00005678/1/АГРО", "product_line_keys": ["PL-005"]}
+  ],
+  "product_lines": [
+    {"key": "PL-001", "voucher_key": "V-001", "quantity": "0.1", "species": "Соняшник", "tax_id": "00000001"},
+    {"key": "PL-002", "voucher_key": "V-002", "quantity": "0.2", "species": "Кукурудза", "tax_id": "00000001"},
+    {"key": "PL-003", "voucher_key": "V-003", "quantity": "7", "species": "Соняшник", "tax_id": "00000002"},
+    {"key": "PL-004", "voucher_key": "V-003", "quantity": "33", "species": "Кукурудза", "tax_id": "00000003"},
+    {"key": "PL-005", "voucher_key": "V-004", "quantity": "1", "species": "Інше", "tax_id": null}
+  ],
+  "expected": {
+    "person_links": {
+      "L-001": {"participant_key": "P-001", "method": "unique_name"},
+      "L-002": {"participant_key": null, "method": "unresolved", "issue": "PERSON_LINK_AMBIGUOUS"},
+      "L-004": {"participant_key": null, "method": "unresolved", "issue": "PERSON_LINK_UNRESOLVED"}
+    },
+    "survey_voucher_links": {
+      "S-001": {"accepted": ["V-001", "V-002"], "method": "short_block", "duplicate_evidence_is_one_set": true},
+      "S-002": {"accepted": [], "issue": "VOUCHER_FIELD_CONFLICT"},
+      "S-003": {"accepted": ["V-003"], "issues": ["VOUCHER_NOT_FOUND"], "volume_kept_without_participant": true}
+    },
+    "accepted_voucher_keys": ["V-001", "V-002", "V-003"],
+    "known_accepted_quantity": "40.3",
+    "accepted_tax_ids": ["00000001", "00000002", "00000003"],
+    "unaccepted_conflicting_quantity": "1"
+  }
+}
