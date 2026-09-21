@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Protocol
@@ -55,6 +55,31 @@ class VoucherMatchMethod(StrEnum):
     SHORT_BLOCK = "short_block"
     DISTRIBUTOR_VARIANT = "distributor_variant"
     MANUAL = "manual"
+
+
+class CropCategory(StrEnum):
+    SUNFLOWER = "sunflower"
+    CORN = "corn"
+    OTHER = "other"
+    UNKNOWN = "unknown"
+
+
+class TimeBucket(StrEnum):
+    BEFORE_LEAD = "before_lead"
+    ON_OR_AFTER_LEAD = "on_or_after_lead"
+    UNKNOWN = "unknown"
+
+
+class LeadDateSource(StrEnum):
+    TIME_TAKEN = "time_taken"
+    PARTICIPANT_FALLBACK = "participant_fallback"
+    CONFLICT = "conflict"
+    UNKNOWN = "unknown"
+
+
+class ProductSection(StrEnum):
+    MAIN = "main"
+    OTHER = "other"
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +136,7 @@ class Participant:
     member_type: str | None
     first_associated_at: datetime | None
     sources: tuple[SourceRecord, ...]
+    member_status: str | None = None
 
     def __post_init__(self) -> None:
         _required(self.key, "key")
@@ -250,6 +276,7 @@ class ProductLine:
     account_name: str | None
     created_at: datetime | None
     sources: tuple[SourceRecord, ...]
+    local_description: str | None = None
 
     def __post_init__(self) -> None:
         _required(self.key, "key")
@@ -314,6 +341,207 @@ class Client:
 
 
 @dataclass(frozen=True, slots=True)
+class LeadDateResolution:
+    lead_ref_key: str
+    value: date | None
+    source: LeadDateSource
+    participant_key: str | None
+    differs_from_participant_date: bool
+    sources: tuple[SourceCell, ...]
+
+    @property
+    def key(self) -> str:
+        return self.lead_ref_key
+
+    def __post_init__(self) -> None:
+        _required(self.lead_ref_key, "lead_ref_key")
+        if self.source in {LeadDateSource.CONFLICT, LeadDateSource.UNKNOWN}:
+            if self.value is not None:
+                raise ValueError("conflicting/unknown lead date cannot have a value")
+        elif self.value is None:
+            raise ValueError("known lead date source requires a value")
+
+
+@dataclass(frozen=True, slots=True)
+class ProductLineFact:
+    product_line_key: str
+    voucher_key: str
+    section: ProductSection
+    quantity: Decimal | None
+    crop: CropCategory
+    hybrid: str | None
+    tax_id: str | None
+    created_on: date | None
+    reference_date: date | None
+    time_bucket: TimeBucket
+    local_description: str | None = None
+
+    @property
+    def key(self) -> str:
+        return self.product_line_key
+
+    def __post_init__(self) -> None:
+        _required(self.product_line_key, "product_line_key")
+        _required(self.voucher_key, "voucher_key")
+        if self.quantity is not None and (
+            not self.quantity.is_finite() or self.quantity < 0
+        ):
+            raise ValueError("known fact quantity must be finite and non-negative")
+        expected_bucket = (
+            TimeBucket.UNKNOWN
+            if self.created_on is None or self.reference_date is None
+            else TimeBucket.BEFORE_LEAD
+            if self.created_on < self.reference_date
+            else TimeBucket.ON_OR_AFTER_LEAD
+        )
+        if self.time_bucket is not expected_bucket:
+            raise ValueError("time bucket does not match product/reference dates")
+
+
+@dataclass(frozen=True, slots=True)
+class LinkProductTimeFact:
+    link_key: str
+    product_line_key: str
+    lead_ref_key: str
+    lead_date: date | None
+    time_bucket: TimeBucket
+
+    @property
+    def key(self) -> str:
+        return f"{self.link_key}:{self.product_line_key}"
+
+    def __post_init__(self) -> None:
+        _required(self.link_key, "link_key")
+        _required(self.product_line_key, "product_line_key")
+        _required(self.lead_ref_key, "lead_ref_key")
+
+
+@dataclass(frozen=True, slots=True)
+class HybridSummary:
+    key: str
+    crop: CropCategory
+    hybrid: str | None
+    product_line_keys: tuple[str, ...]
+    quantity: Measure
+
+    def __post_init__(self) -> None:
+        _required(self.key, "key")
+        _unique(self.product_line_keys, "product_line_keys")
+        if self.hybrid is not None:
+            _required(self.hybrid, "hybrid")
+
+
+@dataclass(frozen=True, slots=True)
+class LinkSummary:
+    link_key: str
+    lead_ref_key: str
+    voucher_key: str
+    participant_key: str | None
+    product_line_keys: tuple[str, ...]
+    tax_ids: tuple[str, ...]
+    client_names: tuple[str, ...]
+    quantity: Measure
+    crop_measures: tuple[Measure, ...]
+    time_measures: tuple[Measure, ...]
+    hybrid_summaries: tuple[HybridSummary, ...] = ()
+
+    @property
+    def key(self) -> str:
+        return self.link_key
+
+    def __post_init__(self) -> None:
+        _required(self.link_key, "link_key")
+        _required(self.lead_ref_key, "lead_ref_key")
+        _required(self.voucher_key, "voucher_key")
+        _unique(self.product_line_keys, "product_line_keys")
+        _unique(self.tax_ids, "tax_ids")
+        _unique(self.client_names, "client_names")
+        _unique(tuple(item.key for item in self.crop_measures), "crop_measures")
+        _unique(tuple(item.key for item in self.time_measures), "time_measures")
+        _unique(
+            tuple(item.key for item in self.hybrid_summaries),
+            "hybrid_summaries",
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class VoucherSummary:
+    voucher_key: str
+    lead_ref_keys: tuple[str, ...]
+    product_line_keys: tuple[str, ...]
+    reference_date: date | None
+    missing_lead_date_count: int
+    quantity: Measure
+    crop_measures: tuple[Measure, ...]
+    time_measures: tuple[Measure, ...]
+    hybrid_summaries: tuple[HybridSummary, ...] = ()
+
+    @property
+    def key(self) -> str:
+        return self.voucher_key
+
+    def __post_init__(self) -> None:
+        _required(self.voucher_key, "voucher_key")
+        _unique(self.lead_ref_keys, "lead_ref_keys")
+        _unique(self.product_line_keys, "product_line_keys")
+        if self.missing_lead_date_count < 0:
+            raise ValueError("missing_lead_date_count must not be negative")
+        _unique(
+            tuple(item.key for item in self.hybrid_summaries),
+            "hybrid_summaries",
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FunnelRow:
+    participant_key: str
+    appeared_on: date | None
+    member_type: str | None
+    member_status: str | None
+    has_activity: bool
+    has_recorded_result: bool
+    has_confirmed_voucher: bool
+    activity_keys: tuple[str, ...]
+    survey_keys: tuple[str, ...]
+    voucher_keys: tuple[str, ...]
+
+    @property
+    def key(self) -> str:
+        return self.participant_key
+
+    def __post_init__(self) -> None:
+        _required(self.participant_key, "participant_key")
+        _unique(self.activity_keys, "activity_keys")
+        _unique(self.survey_keys, "survey_keys")
+        _unique(self.voucher_keys, "voucher_keys")
+        if self.has_activity != bool(self.activity_keys):
+            raise ValueError("has_activity must match activity_keys")
+        if self.has_confirmed_voucher != bool(self.voucher_keys):
+            raise ValueError("has_confirmed_voucher must match voucher_keys")
+
+
+@dataclass(frozen=True, slots=True)
+class EligibleClient:
+    tax_id: str
+    main_voucher_keys: tuple[str, ...]
+    lead_ref_keys: tuple[str, ...]
+    participant_keys: tuple[str, ...]
+    reference_date: date | None
+    other_product_line_keys: tuple[str, ...]
+
+    @property
+    def key(self) -> str:
+        return self.tax_id
+
+    def __post_init__(self) -> None:
+        _required(self.tax_id, "tax_id")
+        _unique(self.main_voucher_keys, "main_voucher_keys")
+        _unique(self.lead_ref_keys, "lead_ref_keys")
+        _unique(self.participant_keys, "participant_keys")
+        _unique(self.other_product_line_keys, "other_product_line_keys")
+
+
+@dataclass(frozen=True, slots=True)
 class ManualDecision:
     decision_id: str
     target: DecisionTarget
@@ -367,6 +595,15 @@ class ReportResult:
     decisions: tuple[ManualDecision, ...]
     issues: tuple[Issue, ...]
     measures: tuple[Measure, ...]
+    lead_dates: tuple[LeadDateResolution, ...] = ()
+    link_summaries: tuple[LinkSummary, ...] = ()
+    voucher_summaries: tuple[VoucherSummary, ...] = ()
+    product_facts: tuple[ProductLineFact, ...] = ()
+    link_product_times: tuple[LinkProductTimeFact, ...] = ()
+    funnel_rows: tuple[FunnelRow, ...] = ()
+    eligible_clients: tuple[EligibleClient, ...] = ()
+    other_product_facts: tuple[ProductLineFact, ...] = ()
+    hybrid_summaries: tuple[HybridSummary, ...] = ()
 
     def __post_init__(self) -> None:
         _required(self.calculation_id, "calculation_id")
@@ -386,6 +623,15 @@ class ReportResult:
             "accepted_links",
             "clients",
             "decisions",
+            "lead_dates",
+            "link_summaries",
+            "voucher_summaries",
+            "product_facts",
+            "link_product_times",
+            "funnel_rows",
+            "eligible_clients",
+            "other_product_facts",
+            "hybrid_summaries",
         ):
             _entity_keys(getattr(self, field_name), field_name)
         _unique(tuple(issue.issue_id for issue in self.issues), "issues")

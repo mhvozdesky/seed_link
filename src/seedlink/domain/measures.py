@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
+from collections.abc import Iterable
 
 
 class MeasureStatus(StrEnum):
@@ -68,7 +69,13 @@ class Measure:
 
     @classmethod
     def unavailable(
-        cls, key: str, label_uk: str, unit: str, reasons: tuple[str, ...]
+        cls,
+        key: str,
+        label_uk: str,
+        unit: str,
+        reasons: tuple[str, ...],
+        *,
+        unknown_count: int = 0,
     ) -> Measure:
         return cls(
             key,
@@ -76,6 +83,40 @@ class Measure:
             unit,
             None,
             MeasureStatus.UNAVAILABLE,
-            0,
+            unknown_count,
             reasons,
         )
+
+
+def quantity_measure(
+    key: str,
+    label_uk: str,
+    quantities: Iterable[Decimal | None],
+    *,
+    extra_unknown_count: int = 0,
+    reasons: tuple[str, ...] = ("Є внески з невідомою кількістю.",),
+) -> Measure:
+    """Aggregate exact Decimal values without turning unknowns into zero."""
+
+    values = tuple(quantities)
+    known = tuple(value for value in values if value is not None)
+    unknown_count = sum(value is None for value in values) + extra_unknown_count
+    known_total = sum(known, Decimal(0))
+    if unknown_count == 0:
+        return Measure.complete(key, label_uk, "од.", known_total)
+    if known:
+        return Measure.partial(
+            key,
+            label_uk,
+            "од.",
+            known_total,
+            unknown_count,
+            reasons,
+        )
+    return Measure.unavailable(
+        key,
+        label_uk,
+        "од.",
+        reasons,
+        unknown_count=unknown_count,
+    )

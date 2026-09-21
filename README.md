@@ -1,10 +1,11 @@
 # SeedLink
 
 Локальна Windows-програма для перевірки чотирьох XLSX-експортів Salesforce і
-побудови звітів Seed Selector. Реалізовано Blocks 01–03: пакет і доменні
+побудови звітів Seed Selector. Реалізовано Blocks 01–04: пакет і доменні
 контракти, суворий імпорт чотирьох XLSX, а також автоматичне зіставлення людей,
-опитувань, згадок і повних ваучерів із provenance та явними проблемами.
-Кількості, дати, воронка й інші бізнесові показники належать Block 04.
+опитувань, згадок і повних ваучерів із provenance та явними проблемами;
+кількості, дати, воронка, клієнти, культури, інші ваучери й незалежні вибірки
+зведено в незмінний `ReportResult`.
 
 ## Розробка
 
@@ -50,4 +51,14 @@ from seedlink.application import analyze_links
 matching = analyze_links(result)
 accepted_voucher_keys = matching.accepted_voucher_keys
 review_issues = matching.issues
+```
+
+Повний автоматичний результат і вибірки Block 04:
+
+```python
+from seedlink.application import build_report_result
+from seedlink.domain import ProductFilter, query_product_lines
+
+report = build_report_result(matching)
+visible_products = query_product_lines(report, ProductFilter())
 ```

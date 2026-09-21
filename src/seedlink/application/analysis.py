@@ -188,6 +188,7 @@ def _build_participants(
                 member_type=record.member_type,
                 first_associated_at=record.first_associated_at,
                 sources=unit.sources,
+                member_status=record.member_status,
             )
         )
     return tuple(result)
@@ -422,6 +423,7 @@ def _build_vouchers_and_lines(
             account_name=record.account_name,
             created_at=record.product_created_at,
             sources=unit.sources,
+            local_description=record.local_description,
         )
         product_lines.append(line)
         if voucher_key is not None:

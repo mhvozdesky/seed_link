@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from seedlink.application import analyze_links
+from seedlink.application import analyze_links, build_report_result
 from seedlink.domain.issues import IssueCode
 from seedlink.domain.provenance import InputRole
 from seedlink.input_xlsx import import_workbooks
@@ -103,3 +103,43 @@ def test_local_real_workbooks_produce_three_auditable_automatic_vouchers():
         issue.code for issue in matching.issues
     } == {IssueCode.DATE_INVALID, IssueCode.VOUCHER_NOT_FOUND}
     assert all(link.evidence for link in matching.accepted_links)
+
+
+def test_local_real_workbooks_produce_block04_control_totals():
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    paths = {
+        InputRole(item["role"]): (PROJECT / item["path_from_project"]).resolve()
+        for item in manifest["sources"]
+    }
+    if not all(path.is_file() for path in paths.values()):
+        pytest.skip("Локальний приватний комплект XLSX відсутній")
+
+    result = build_report_result(analyze_links(import_workbooks(paths)))
+    measures = {measure.key: measure for measure in result.measures}
+
+    assert measures["main.quantity"].known_value == Decimal("106")
+    assert measures["main.crop.sunflower"].known_value == Decimal("19")
+    assert measures["main.crop.corn"].known_value == Decimal("87")
+    assert measures["main.vouchers"].known_value == Decimal("3")
+    assert measures["main.clients"].known_value == Decimal("3")
+    assert len(result.product_facts) == 5
+    voucher_40 = next(
+        voucher
+        for voucher in result.vouchers
+        if voucher.full_number == "SE-2777788897-безкоштовні мішки"
+    )
+    client_parts: dict[str, Decimal] = {}
+    for line in result.product_lines:
+        if (
+            line.voucher_key != voucher_40.key
+            or line.tax_id is None
+            or line.quantity is None
+        ):
+            continue
+        client_parts[line.tax_id] = (
+            client_parts.get(line.tax_id, Decimal(0)) + line.quantity
+        )
+    assert client_parts == {
+        "34327335": Decimal("7"),
+        "77788897": Decimal("33"),
+    }
