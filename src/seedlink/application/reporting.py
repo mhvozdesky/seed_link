@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import UTC, datetime
 from hashlib import sha256
 import logging
@@ -16,7 +17,7 @@ from seedlink.domain.aggregation import (
 from seedlink.domain.date_attribution import resolve_lead_dates
 from seedlink.domain.funnel import build_funnel_rows
 from seedlink.domain.invariants import ReportInvariantError, validate_report_result
-from seedlink.domain.models import ReportResult
+from seedlink.domain.models import ManualDecision, ReportResult
 from seedlink.domain.other_vouchers import build_other_vouchers
 from seedlink.domain.provenance import InputRole
 
@@ -51,11 +52,15 @@ def build_report_result(
     *,
     revision: int = 0,
     calculated_at: datetime | None = None,
+    decisions: tuple[ManualDecision, ...] = (),
+    check_cancelled: Callable[[], None] | None = None,
 ) -> ReportResult:
     """Turn Block 03 automatic facts into a complete Block 04 result."""
 
     if revision < 0:
         raise ValueError("revision must not be negative")
+    checkpoint = check_cancelled or (lambda: None)
+    checkpoint()
     lead_dates, date_issues = resolve_lead_dates(
         matching.lead_refs,
         matching.participants,
@@ -70,6 +75,7 @@ def build_report_result(
         lead_dates=lead_dates,
         unknown_groups_by_voucher=unknown_groups,
     )
+    checkpoint()
     main_line_by_key = {line.key: line for line in matching.product_lines}
     main_lines = tuple(
         main_line_by_key[fact.product_line_key] for fact in main.product_facts
@@ -83,6 +89,7 @@ def build_report_result(
         matching.participant_links,
         matching.accepted_links,
     )
+    checkpoint()
     eligible_clients, other_facts, eligibility_issues = build_other_vouchers(
         accepted_links=matching.accepted_links,
         product_lines=matching.product_lines,
@@ -91,6 +98,7 @@ def build_report_result(
         main_facts=main.product_facts,
         lead_dates=lead_dates,
     )
+    checkpoint()
     issues_by_id = {
         issue.issue_id: issue
         for issue in (
@@ -117,7 +125,25 @@ def build_report_result(
         unknown_groups_by_voucher=unknown_groups,
         issues=issues,
     )
-    calculation_identity = f"{matching.snapshot_id}\x1f{revision}"
+    checkpoint()
+    decision_identity = "\x1e".join(
+        "\x1f".join(
+            (
+                decision.decision_id,
+                decision.target.value,
+                decision.target_key,
+                decision.action.value,
+                "\x1d".join(decision.selected_keys),
+                "\x1c".join(decision.mention_keys),
+                decision.reason or "",
+                str(decision.sequence),
+            )
+        )
+        for decision in decisions
+    )
+    calculation_identity = (
+        f"{matching.snapshot_id}\x1f{revision}\x1f{decision_identity}"
+    )
     calculation_id = (
         "calculation:"
         + sha256(calculation_identity.encode("utf-8")).hexdigest()
@@ -137,7 +163,7 @@ def build_report_result(
         product_lines=matching.product_lines,
         accepted_links=matching.accepted_links,
         clients=clients,
-        decisions=(),
+        decisions=decisions,
         issues=issues,
         measures=measures,
         lead_dates=lead_dates,
@@ -159,7 +185,5 @@ def build_report_result(
             error.diagnostic_ref,
         )
         raise
+    checkpoint()
     return result
-
-
-calculate_report = build_report_result

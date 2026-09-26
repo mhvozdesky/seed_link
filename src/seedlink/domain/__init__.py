@@ -84,10 +84,12 @@ from seedlink.domain.queries import (
 )
 from seedlink.domain.voucher_matching import (
     VoucherMatchingResult,
+    accepted_link_key,
     VoucherNumberKind,
     VoucherNumberParts,
     match_vouchers,
     parse_voucher_number,
+    voucher_match_method_priority,
 )
 
 __all__ = [
@@ -142,6 +144,7 @@ __all__ = [
     "Voucher",
     "VoucherSummary",
     "VoucherMatchingResult",
+    "accepted_link_key",
     "VoucherMatchEvidence",
     "VoucherMatchMethod",
     "VoucherMention",
@@ -152,6 +155,7 @@ __all__ = [
     "match_participants",
     "match_vouchers",
     "parse_voucher_number",
+    "voucher_match_method_priority",
     "query_funnel",
     "query_lead_vouchers",
     "query_issues",

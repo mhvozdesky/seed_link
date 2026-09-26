@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -952,11 +952,16 @@ def import_workbooks(
     *,
     loaded_at: datetime | None = None,
     program_version: str = __version__,
+    check_cancelled: Callable[[], None] | None = None,
+    workbook_loaded: Callable[[InputRole, int, int], None] | None = None,
 ) -> ImportResult:
     """Read all slots and build a snapshot only when no fatal issue exists."""
 
+    checkpoint = check_cancelled or (lambda: None)
     results: list[WorkbookReadResult] = []
-    for role in InputRole:
+    roles = tuple(InputRole)
+    checkpoint()
+    for index, role in enumerate(roles, start=1):
         path = paths.get(role)
         if path is None:
             results.append(
@@ -969,6 +974,9 @@ def import_workbooks(
             )
         else:
             results.append(read_workbook(path, role))
+        if workbook_loaded is not None:
+            workbook_loaded(role, index, len(roles))
+        checkpoint()
     all_issues = tuple(issue for result in results for issue in result.issues)
     if any(not result.is_accepted for result in results):
         return ImportResult(None, tuple(results), all_issues)

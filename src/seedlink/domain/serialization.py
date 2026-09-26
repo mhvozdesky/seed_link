@@ -83,6 +83,41 @@ def serialize_report_result(result: ReportResult) -> dict[str, object]:
                 for source in result.snapshot.sources
             ],
         },
+        "decisions": [
+            {
+                "decision_id": decision.decision_id,
+                "target": decision.target.value,
+                "target_key": decision.target_key,
+                "action": decision.action.value,
+                "selected_keys": list(decision.selected_keys),
+                "mention_keys": list(decision.mention_keys),
+                "reason": decision.reason,
+                "sequence": decision.sequence,
+                "created_at": decision.created_at.isoformat(),
+            }
+            for decision in result.decisions
+        ],
+        "participant_links": [
+            {
+                "subject_kind": link.subject_kind.value,
+                "subject_key": link.subject_key,
+                "participant_key": link.participant_key,
+                "method": link.method.value,
+                "decision_id": link.decision_id,
+            }
+            for link in result.participant_links
+        ],
+        "accepted_links": [
+            {
+                "lead_ref_key": link.lead_ref_key,
+                "voucher_key": link.voucher_key,
+                "survey_keys": list(link.survey_keys),
+                "mention_keys": list(link.mention_keys),
+                "method": link.method.value,
+                "decision_id": link.decision_id,
+            }
+            for link in result.accepted_links
+        ],
         "measures": [
             _measure(item) for item in sorted(result.measures, key=lambda item: item.key)
         ],
@@ -131,6 +166,7 @@ def serialize_report_result(result: ReportResult) -> dict[str, object]:
                 "message_uk": issue.message_uk,
                 "affected_keys": list(issue.affected_keys),
                 "resolved": issue.is_resolved,
+                "resolved_by_decision_id": issue.resolved_by_decision_id,
             }
             for issue in sorted(result.issues, key=lambda item: item.issue_id)
         ],

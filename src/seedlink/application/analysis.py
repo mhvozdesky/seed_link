@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
 
@@ -531,15 +532,23 @@ def _uncertainties(
     return tuple(result)
 
 
-def analyze_links(import_result: ImportResult) -> AutomaticMatchingResult:
+def analyze_links(
+    import_result: ImportResult,
+    *,
+    check_cancelled: Callable[[], None] | None = None,
+) -> AutomaticMatchingResult:
     """Run Block 03 over a successfully validated four-workbook import."""
 
     if not import_result.is_accepted or import_result.snapshot is None:
         raise ValueError("automatic analysis requires an accepted import")
 
+    checkpoint = check_cancelled or (lambda: None)
+    checkpoint()
+
     r1_units = _record_units(import_result.workbook(InputRole.R1))
     r3_units = _record_units(import_result.workbook(InputRole.R3))
     r4_units = _record_units(import_result.workbook(InputRole.R4))
+    checkpoint()
 
     participants = _build_participants(
         r3_units, import_result.snapshot.snapshot_id
@@ -550,13 +559,17 @@ def analyze_links(import_result: ImportResult) -> AutomaticMatchingResult:
     surveys, lead_refs, lead_ref_by_source_row = _build_r1_entities(
         r1_units, import_result.snapshot.snapshot_id
     )
+    checkpoint()
     vouchers, product_lines, entity_issues = _build_vouchers_and_lines(
         import_result.workbook(InputRole.R2), import_result.snapshot.snapshot_id
     )
+    checkpoint()
     people = match_participants(participants, lead_refs, activities)
+    checkpoint()
     voucher_matching = match_vouchers(
         surveys, vouchers, lead_ref_by_source_row
     )
+    checkpoint()
     issues = (
         import_result.issues
         + entity_issues

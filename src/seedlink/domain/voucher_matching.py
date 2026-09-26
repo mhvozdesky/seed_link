@@ -309,13 +309,18 @@ def _index_vouchers(vouchers: tuple[Voucher, ...]):
     )
 
 
-def _method_priority(method: VoucherMatchMethod) -> int:
+def voucher_match_method_priority(method: VoucherMatchMethod) -> int:
     return {
         VoucherMatchMethod.EXACT_FULL: 0,
         VoucherMatchMethod.SHORT_BLOCK: 1,
         VoucherMatchMethod.DISTRIBUTOR_VARIANT: 2,
         VoucherMatchMethod.MANUAL: 3,
     }[method]
+
+
+def accepted_link_key(lead_ref_key: str, voucher_key: str) -> str:
+    identity = f"{lead_ref_key}\x1f{voucher_key}"
+    return f"accepted-link:{sha256(identity.encode('utf-8')).hexdigest()}"
 
 
 def match_vouchers(
@@ -456,7 +461,7 @@ def match_vouchers(
             ),
         )
         methods = tuple(item[1] for item in ordered)
-        method = min(methods, key=_method_priority)
+        method = min(methods, key=voucher_match_method_priority)
         survey_keys = tuple(
             dict.fromkeys(item[0].mention.survey_key for item in ordered)
         )
@@ -464,10 +469,9 @@ def match_vouchers(
         sources = tuple(
             dict.fromkeys(item[0].mention.source for item in ordered)
         )
-        identity = f"{lead_ref_key}\x1f{voucher_key}"
         accepted_links.append(
             AcceptedLink(
-                key=f"accepted-link:{sha256(identity.encode('utf-8')).hexdigest()}",
+                key=accepted_link_key(lead_ref_key, voucher_key),
                 lead_ref_key=lead_ref_key,
                 voucher_key=voucher_key,
                 survey_keys=survey_keys,

@@ -97,6 +97,7 @@ class VoucherMatchEvidence:
 
 class DecisionTarget(StrEnum):
     VOUCHER_CASE = "voucher_case"
+    LEAD_REF_PARTICIPANT = "lead_ref_participant"
     SURVEY_PARTICIPANT = "survey_participant"
     ACTIVITY_PARTICIPANT = "activity_participant"
 
@@ -551,6 +552,7 @@ class ManualDecision:
     reason: str | None
     sequence: int
     created_at: datetime
+    mention_keys: tuple[str, ...] = ()
 
     @property
     def key(self) -> str:
@@ -560,6 +562,7 @@ class ManualDecision:
         _required(self.decision_id, "decision_id")
         _required(self.target_key, "target_key")
         _unique(self.selected_keys, "selected_keys")
+        _unique(self.mention_keys, "mention_keys")
         if self.sequence < 1:
             raise ValueError("decision sequence must be positive")
         _aware(self.created_at, "created_at")
