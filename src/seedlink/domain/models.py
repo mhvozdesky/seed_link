@@ -89,10 +89,18 @@ class VoucherMatchEvidence:
     mention_key: str
     survey_key: str
     method: VoucherMatchMethod
+    decision_id: str | None = None
 
     def __post_init__(self) -> None:
         _required(self.mention_key, "mention_key")
         _required(self.survey_key, "survey_key")
+        if self.method is VoucherMatchMethod.MANUAL and not self.decision_id:
+            raise ValueError("manual voucher evidence must reference a decision")
+        if (
+            self.method is not VoucherMatchMethod.MANUAL
+            and self.decision_id is not None
+        ):
+            raise ValueError("automatic voucher evidence cannot reference a decision")
 
 
 class DecisionTarget(StrEnum):
@@ -323,6 +331,18 @@ class AcceptedLink:
                 )
             if any(item.survey_key not in self.survey_keys for item in self.evidence):
                 raise ValueError("accepted link evidence must reference its surveys")
+            manual_ids = {
+                item.decision_id
+                for item in self.evidence
+                if item.method is VoucherMatchMethod.MANUAL
+            }
+            if manual_ids and (
+                self.method is not VoucherMatchMethod.MANUAL
+                or self.decision_id not in manual_ids
+            ):
+                raise ValueError("manual evidence must determine link attribution")
+            if not manual_ids and self.method is VoucherMatchMethod.MANUAL:
+                raise ValueError("manual link must contain manual evidence")
 
 
 @dataclass(frozen=True, slots=True)

@@ -234,17 +234,6 @@ def _validate_voucher_decision(
             SessionErrorCode.INVALID_DECISION,
             "Ваучерне рішення має містити хоча б один mention_key.",
         )
-    if decision.action is not DecisionAction.SELECT and (
-        scoped_keys != survey_mention_keys
-    ):
-        _decision_error(
-            SessionErrorCode.INVALID_DECISION,
-            "REJECT і LEAVE_UNRESOLVED застосовуються до всіх згадок Survey.",
-            details=(
-                ("survey_key", survey.key),
-                ("mention_keys", ", ".join(decision.mention_keys)),
-            ),
-        )
 
     scoped_mentions = tuple(
         context.mention_by_key[key] for key in decision.mention_keys
@@ -456,9 +445,16 @@ def _strip_mentions_from_links(
                 for key in remaining_mention_keys
             )
         )
-        method = min(
-            (item.method for item in evidence),
-            key=voucher_match_method_priority,
+        manual_evidence = tuple(
+            item for item in evidence if item.method is VoucherMatchMethod.MANUAL
+        )
+        method = (
+            VoucherMatchMethod.MANUAL
+            if manual_evidence
+            else min(
+                (item.method for item in evidence),
+                key=voucher_match_method_priority,
+            )
         )
         result.append(
             replace(
@@ -468,9 +464,7 @@ def _strip_mentions_from_links(
                 sources=sources,
                 method=method,
                 decision_id=(
-                    link.decision_id
-                    if method is VoucherMatchMethod.MANUAL
-                    else None
+                    manual_evidence[0].decision_id if manual_evidence else None
                 ),
                 evidence=evidence,
             )
@@ -525,6 +519,7 @@ def _apply_voucher_decision(
                     mention_key=mention.key,
                     survey_key=decision.target_key,
                     method=VoucherMatchMethod.MANUAL,
+                    decision_id=decision.decision_id,
                 )
                 for mention in mentions
             )

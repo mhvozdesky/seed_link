@@ -642,6 +642,7 @@ def test_manual_voucher_evidence_contains_only_selected_mentions(
     revised = session.select_vouchers(
         survey.key,
         (selected_voucher.key,),
+        mention_keys=(selected_mention.key,),
     )
 
     assert revised.decisions[0].mention_keys == (selected_mention.key,)
@@ -979,3 +980,96 @@ def test_r01_multi_mention_outside_choice_requires_explicit_scope(
     assert revised.decisions[0].mention_keys == (
         mention_by_text["QQ-811"].key,
     )
+
+
+def test_reject_can_target_one_of_multiple_automatic_mentions(workbook_set_factory):
+    session, automatic = _session(
+        workbook_set_factory,
+        {
+            InputRole.R1: [_r1("R1", "S1", "SE-400, XY-500")],
+            InputRole.R2: [_r2("P1", "SE-400", 10), _r2("P2", "XY-500", 20)],
+            InputRole.R3: [_r3(MEMBER_A, "Лід", "Один")],
+        },
+    )
+    survey = automatic.surveys[0]
+    mention = next(
+        item for item in automatic.mentions if item.matched_text == "XY-500"
+    )
+
+    revised = session.apply_decision(
+        DecisionTarget.VOUCHER_CASE,
+        survey.key,
+        DecisionAction.REJECT,
+        mention_keys=(mention.key,),
+        reason="Друга згадка помилкова",
+    )
+
+    accepted_numbers = {
+        voucher.full_number
+        for voucher in revised.vouchers
+        if any(link.voucher_key == voucher.key for link in revised.accepted_links)
+    }
+    assert accepted_numbers == {"SE-400"}
+    assert _measure(revised, "main.quantity") == Decimal(10)
+
+
+def test_manual_evidence_keeps_its_decision_after_other_mention_is_replaced(
+    workbook_set_factory,
+):
+    session, automatic = _session(
+        workbook_set_factory,
+        {
+            InputRole.R1: [_r1("R1", "S1", "SE-400, SE-400, QQ-777")],
+            InputRole.R2: [_r2("P1", "SE-400", 10), _r2("P2", "XY-500", 20)],
+            InputRole.R3: [_r3(MEMBER_A, "Лід", "Один")],
+        },
+    )
+    survey = automatic.surveys[0]
+    mentions = sorted(automatic.mentions, key=lambda item: item.start)
+    vouchers = {item.full_number: item for item in automatic.vouchers}
+    first = session.select_vouchers(
+        survey.key,
+        (vouchers["SE-400"].key,),
+        mention_keys=(mentions[2].key,),
+        reason="Ручне підтвердження нерозпізнаної згадки",
+    )
+    first_decision = first.decisions[0]
+    second = session.select_vouchers(
+        survey.key,
+        (vouchers["XY-500"].key,),
+        mention_keys=(mentions[0].key,),
+        reason="Перша згадка належить іншому ваучеру",
+    )
+
+    retained = next(
+        link
+        for link in second.accepted_links
+        if link.voucher_key == vouchers["SE-400"].key
+    )
+    manual = next(
+        item for item in retained.evidence if item.mention_key == mentions[2].key
+    )
+    assert retained.method is VoucherMatchMethod.MANUAL
+    assert retained.decision_id == first_decision.decision_id
+    assert manual.decision_id == first_decision.decision_id
+
+
+def test_rejected_decision_restores_generation_for_background_result(
+    workbook_set_factory,
+):
+    session, automatic = _session(
+        workbook_set_factory,
+        {
+            InputRole.R1: [_r1("R1", "S1", "SE-900")],
+            InputRole.R2: [_r2("P1", "SE-900", 1)],
+            InputRole.R3: [_r3(MEMBER_A, "Лід", "Один")],
+        },
+    )
+    generation, state = session._result_state()
+
+    with pytest.raises(DecisionValidationError) as rejected:
+        session.select_vouchers(automatic.surveys[0].key, ("missing-voucher",))
+    assert rejected.value.code is SessionErrorCode.UNKNOWN_SELECTION
+
+    session._commit(generation, state)
+    assert session.state.report_result == state.report_result

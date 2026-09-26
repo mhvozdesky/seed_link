@@ -115,6 +115,15 @@ def serialize_report_result(result: ReportResult) -> dict[str, object]:
                 "mention_keys": list(link.mention_keys),
                 "method": link.method.value,
                 "decision_id": link.decision_id,
+                "evidence": [
+                    {
+                        "mention_key": item.mention_key,
+                        "survey_key": item.survey_key,
+                        "method": item.method.value,
+                        "decision_id": item.decision_id,
+                    }
+                    for item in link.evidence
+                ],
             }
             for link in result.accepted_links
         ],
@@ -184,6 +193,10 @@ def business_control_payload(result: ReportResult) -> dict[str, object]:
         "hybrids": payload["hybrids"],
         "funnel": payload["funnel"],
         "issue_codes": sorted(issue.code.value for issue in result.issues),
+        "issue_states": sorted(
+            (issue.code.value, issue.is_resolved)
+            for issue in result.issues
+        ),
     }
 
 

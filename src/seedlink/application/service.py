@@ -61,6 +61,11 @@ class SeedLinkSession:
             self._generation += 1
             return self._generation, self._state
 
+    def _rollback_generation(self, generation: int) -> None:
+        with self._lock:
+            if self._generation == generation:
+                self._generation -= 1
+
     def _commit(
         self,
         generation: int,
@@ -219,6 +224,7 @@ class SeedLinkSession:
             or state.automatic_result is None
             or state.report_result is None
         ):
+            self._rollback_generation(generation)
             raise SessionStateError(
                 SessionErrorCode.INVALID_STATE,
                 "Ручне рішення або перерахунок потребує готового результату.",
@@ -237,8 +243,12 @@ class SeedLinkSession:
         cancellation: CancellationToken | None,
         progress: ProgressCallback | None,
     ) -> ReportResult:
-        assert state.automatic_result is not None
-        assert state.import_result is not None
+        if state.automatic_result is None or state.import_result is None:
+            self._rollback_generation(generation)
+            raise SessionStateError(
+                SessionErrorCode.INVALID_STATE,
+                "Перерахунок потребує готового автоматичного результату.",
+            )
         token = self._token(cancellation)
         decision_total = len(decisions)
         start_progress = (
@@ -280,15 +290,19 @@ class SeedLinkSession:
                 ),
             )
 
-        report = recalculate_with_decisions(
-            state.automatic_result,
-            decisions,
-            revision=revision,
-            calculated_at=calculated_at,
-            check_cancelled=token.raise_if_cancelled,
-            decisions_applied=after_decisions,
-        )
-        token.raise_if_cancelled()
+        try:
+            report = recalculate_with_decisions(
+                state.automatic_result,
+                decisions,
+                revision=revision,
+                calculated_at=calculated_at,
+                check_cancelled=token.raise_if_cancelled,
+                decisions_applied=after_decisions,
+            )
+            token.raise_if_cancelled()
+        except BaseException:
+            self._rollback_generation(generation)
+            raise
         new_state = SessionState(
             status=SessionStatus.RESULT,
             import_result=state.import_result,
@@ -406,6 +420,13 @@ class SeedLinkSession:
         mentions = tuple(
             item for item in automatic.mentions if item.survey_key == survey.key
         )
+        if not mentions:
+            raise DecisionValidationError(
+                SessionErrorCode.INVALID_DECISION,
+                "Опитування не містить розпізнаних згадок ваучера; "
+                "ручний вибір неможливий.",
+                details=(("survey_key", survey.key),),
+            )
         if supplied_keys is not None:
             return supplied_keys
         if action is not DecisionAction.SELECT:
@@ -435,6 +456,26 @@ class SeedLinkSession:
                 )
                 if related.intersection(issue_mentions):
                     related.update(issue_mentions)
+            unselected_mentions = {
+                evidence.mention_key
+                for link in automatic.accepted_links
+                if link.voucher_key not in selected
+                for evidence in link.evidence
+                if evidence.survey_key == survey.key
+            }
+            if unselected_mentions - related:
+                raise DecisionValidationError(
+                    SessionErrorCode.INVALID_DECISION,
+                    "Survey має кілька незалежних автоматичних зв’язків; "
+                    "для зміни підмножини передайте mention_keys явно.",
+                    details=(
+                        ("survey_key", survey.key),
+                        (
+                            "available_mention_keys",
+                            ", ".join(item.key for item in mentions),
+                        ),
+                    ),
+                )
             return tuple(
                 item.key for item in mentions if item.key in related
             )
@@ -470,30 +511,39 @@ class SeedLinkSession:
         if not isinstance(target, DecisionTarget) or not isinstance(
             action, DecisionAction
         ):
+            self._rollback_generation(generation)
             raise DecisionValidationError(
                 SessionErrorCode.INVALID_DECISION,
                 "Тип цілі або дії ручного рішення не підтримується.",
             )
         if target is DecisionTarget.SURVEY_PARTICIPANT:
-            target_key = self._lead_ref_for_survey(state, target_key)
+            try:
+                target_key = self._lead_ref_for_survey(state, target_key)
+            except BaseException:
+                self._rollback_generation(generation)
+                raise
             target = DecisionTarget.LEAD_REF_PARTICIPANT
-        selected = self._keys(selected_keys, "selected_keys")
-        supplied_mentions = (
-            self._keys(mention_keys, "mention_keys")
-            if mention_keys is not None
-            else None
-        )
-        scoped_mentions = (
-            self._voucher_mention_scope(
-                state,
-                target_key,
-                selected,
-                action,
-                supplied_mentions,
+        try:
+            selected = self._keys(selected_keys, "selected_keys")
+            supplied_mentions = (
+                self._keys(mention_keys, "mention_keys")
+                if mention_keys is not None
+                else None
             )
-            if target is DecisionTarget.VOUCHER_CASE
-            else supplied_mentions or ()
-        )
+            scoped_mentions = (
+                self._voucher_mention_scope(
+                    state,
+                    target_key,
+                    selected,
+                    action,
+                    supplied_mentions,
+                )
+                if target is DecisionTarget.VOUCHER_CASE
+                else supplied_mentions or ()
+            )
+        except BaseException:
+            self._rollback_generation(generation)
+            raise
         timestamp = created_at or datetime.now(UTC)
         normalized_reason = (
             (reason.strip() or None) if reason is not None else None
@@ -520,6 +570,7 @@ class SeedLinkSession:
                 mention_keys=scoped_mentions,
             )
         except ValueError as error:
+            self._rollback_generation(generation)
             raise DecisionValidationError(
                 SessionErrorCode.INVALID_DECISION,
                 f"Некоректне ручне рішення: {error}.",
@@ -631,6 +682,7 @@ class SeedLinkSession:
             item for item in state.decisions if item.decision_id != decision_id
         )
         if len(decisions) == len(state.decisions):
+            self._rollback_generation(generation)
             raise DecisionValidationError(
                 SessionErrorCode.DECISION_NOT_FOUND,
                 "Активне ручне рішення для скасування не знайдено.",
