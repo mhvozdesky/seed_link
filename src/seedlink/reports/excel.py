@@ -28,7 +28,7 @@ from seedlink.domain.models import (
     TimeBucket,
     VoucherMatchMethod,
 )
-from seedlink.domain.queries import issue_impacts
+from seedlink.domain.queries import issue_impacts, link_related_keys
 from seedlink.domain.provenance import SourceRecord
 from seedlink.reports.excel_formulas import (
     VISIBLE_HEADER,
@@ -739,16 +739,7 @@ class _ExcelWriter:
             lead_date = self.lead_date_by_key.get(summary.lead_ref_key)
             voucher_summary = self.voucher_summary_by_key[summary.voucher_key]
             start_date, end_date = self._product_date_range(summary.product_line_keys)
-            issues = self._issues_for(
-                (
-                    summary.link_key,
-                    summary.lead_ref_key,
-                    summary.voucher_key,
-                    *link.survey_keys,
-                    *link.mention_keys,
-                    *summary.product_line_keys,
-                )
-            )
+            issues = self._issues_for(link_related_keys(link, summary))
             crop = {item.key.rsplit(".", 1)[-1]: item for item in summary.crop_measures}
             personal_time = {item.key.rsplit(".", 1)[-1]: item for item in summary.time_measures}
             global_time = {item.key.rsplit(".", 1)[-1]: item for item in voucher_summary.time_measures}
@@ -1290,4 +1281,3 @@ def write_excel_report(
         raise ValueError("exported_at must be timezone-aware")
     _ExcelWriter(result, path, timestamp).write()
     return path
-

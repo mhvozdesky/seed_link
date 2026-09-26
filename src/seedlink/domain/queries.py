@@ -10,6 +10,7 @@ from enum import StrEnum
 from seedlink.domain.measures import Measure, quantity_measure
 from seedlink.domain.issues import Issue, IssueCode, IssueLevel
 from seedlink.domain.models import (
+    AcceptedLink,
     CropCategory,
     FunnelRow,
     LinkSummary,
@@ -134,6 +135,29 @@ class LinkQueryResult:
 class IssueQueryResult:
     rows: tuple[Issue, ...]
     measures: tuple[Measure, ...]
+
+
+def link_related_keys(
+    link: AcceptedLink, summary: LinkSummary
+) -> frozenset[str]:
+    """Keys whose issues affect one accepted lead-voucher pair."""
+
+    if link.key != summary.link_key:
+        raise ValueError("accepted link and link summary keys must match")
+    if link.lead_ref_key != summary.lead_ref_key:
+        raise ValueError("accepted link and link summary lead references must match")
+    if link.voucher_key != summary.voucher_key:
+        raise ValueError("accepted link and link summary vouchers must match")
+    return frozenset(
+        (
+            summary.link_key,
+            summary.lead_ref_key,
+            summary.voucher_key,
+            *link.survey_keys,
+            *link.mention_keys,
+            *summary.product_line_keys,
+        )
+    )
 
 
 def _normalized_set(values: tuple[str, ...]) -> set[str]:
@@ -347,14 +371,9 @@ def query_lead_vouchers(
             filters.has_issues is None
             or filters.has_issues
             == bool(
-                {
-                    summary.link_key,
-                    summary.lead_ref_key,
-                    summary.voucher_key,
-                    *link_by_key[summary.link_key].survey_keys,
-                    *link_by_key[summary.link_key].mention_keys,
-                    *summary.product_line_keys,
-                }.intersection(affected)
+                link_related_keys(link_by_key[summary.link_key], summary).intersection(
+                    affected
+                )
             )
         )
     )

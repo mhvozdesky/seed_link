@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>SeedLink — автономний звіт</title>
+  <style>{{ css }}</style>
+</head>
+<body>
+  <a class="skip-link" href="#main">До основного вмісту</a>
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Seed Selector · локальний звіт</p>
+      <h1>Результати SeedLink</h1>
+      <p class="hero-copy">Один автономний файл. Дані доступні лише для читання, а фільтри кожного розділу працюють незалежно.</p>
+    </div>
+    <div class="hero-meta" id="hero-meta" aria-label="Метадані звіту"></div>
+  </header>
+
+  <nav class="section-nav" aria-label="Розділи звіту">
+    <a href="#overview">Огляд</a>
+    <a href="#participants">Учасники</a>
+    <a href="#vouchers">Ваучери</a>
+    <a href="#products">Товарні рядки</a>
+    <a href="#other-products">Інші ваучери</a>
+    <a href="#issues">Проблеми</a>
+    <a href="#metadata">Метадані</a>
+  </nav>
+
+  <main id="main">
+    <section id="overview" class="report-section">
+      <div class="section-heading">
+        <div><p class="eyebrow">Поточна ревізія</p><h2>Огляд</h2></div>
+        <div id="integrity" class="integrity" role="status"></div>
+      </div>
+      <p class="scope-note">Показники всього комплекту; не залежать від фільтрів розділів.</p>
+      <div id="overview-cards" class="metric-grid"></div>
+      <div class="chart-grid">
+        <figure class="chart-card">
+          <figcaption>Воронка учасників, осіб</figcaption>
+          <canvas id="funnel-chart" width="720" height="310" aria-label="Стовпчикова діаграма воронки"></canvas>
+        </figure>
+        <figure class="chart-card">
+          <figcaption>Обсяг за культурами, од.</figcaption>
+          <canvas id="crop-chart" width="720" height="310" aria-label="Стовпчикова діаграма культур"></canvas>
+        </figure>
+        <figure class="chart-card">
+          <figcaption>Часовий розподіл обсягу, од.</figcaption>
+          <canvas id="time-chart" width="720" height="310" aria-label="Стовпчикова діаграма часового розподілу"></canvas>
+        </figure>
+        <figure class="chart-card">
+          <figcaption>Обсяг за місяцями ProductLine, од.</figcaption>
+          <canvas id="month-chart" width="720" height="310" aria-label="Стовпчикова діаграма місячного обсягу"></canvas>
+        </figure>
+      </div>
+    </section>
+
+    <section id="participants" class="report-section data-section">
+      <div class="section-heading"><div><p class="eyebrow">Незалежна вибірка</p><h2>Учасники й активності</h2></div><p class="section-note">Один рядок — один учасник кампанії. Контактних даних у файлі немає.</p></div>
+      <div class="filters" data-controls="participants">
+        <label>Пошук<input type="search" data-filter="search" placeholder="Ім’я, тип, статус, ваучер"></label>
+        <label>Тип<select data-filter="memberType"><option value="">Усі</option></select></label>
+        <label>Статус<select data-filter="memberStatus"><option value="">Усі</option></select></label>
+        <label>Дата від<input type="date" data-filter="dateFrom"></label>
+        <label>Дата до<input type="date" data-filter="dateTo"></label>
+        <button type="button" class="secondary" data-reset="participants">Скинути</button>
+      </div>
+      <div class="metric-strip" data-metrics="participants"></div>
+      <div class="table-wrap"><table data-table="participants"><thead></thead><tbody></tbody></table></div>
+    </section>
+
+    <section id="vouchers" class="report-section data-section">
+      <div class="section-heading"><div><p class="eyebrow">Основний результат</p><h2>Ваучери</h2></div><p class="section-note">Ваучер підсумовується один раз, навіть якщо він пов’язаний із кількома лідами.</p></div>
+      <div class="filters" data-controls="vouchers">
+        <label>Пошук<input type="search" data-filter="search" placeholder="Номер, учасник, клієнт, Tax ID"></label>
+        <label>Метод<select data-filter="method"><option value="">Усі</option></select></label>
+        <label>Проблеми<select data-filter="issues"><option value="">Усі</option><option value="yes">Є невирішені</option><option value="no">Немає невирішених</option></select></label>
+        <button type="button" class="secondary" data-reset="vouchers">Скинути</button>
+      </div>
+      <div class="metric-strip" data-metrics="vouchers"></div>
+      <div class="table-wrap"><table data-table="vouchers"><thead></thead><tbody></tbody></table></div>
+    </section>
+
+    <section id="products" class="report-section data-section">
+      <div class="section-heading"><div><p class="eyebrow">Незалежна вибірка</p><h2>Товарні рядки</h2></div><p class="section-note">Фільтри не змінюють воронку або встановлені зв’язки. Пошук не відкидає невідомі нематеріалізовані внески, бо для них немає безпечного текстового рядка.</p></div>
+      <div class="filters" data-controls="products">
+        <label>Пошук<input type="search" data-filter="search" placeholder="Ваучер, клієнт, Tax ID, гібрид"></label>
+        <label>Культура<select data-filter="crop"><option value="">Усі</option></select></label>
+        <label>Tax ID<select data-filter="taxId"><option value="">Усі</option></select></label>
+        <label>Ваучер<select data-filter="voucherKey"><option value="">Усі</option></select></label>
+        <label>Дата від<input type="date" data-filter="dateFrom"></label>
+        <label>Дата до<input type="date" data-filter="dateTo"></label>
+        <button type="button" class="secondary" data-reset="products">Скинути</button>
+      </div>
+      <div class="metric-strip" data-metrics="products"></div>
+      <div class="table-wrap"><table data-table="products"><thead></thead><tbody></tbody></table></div>
+    </section>
+
+    <section id="other-products" class="report-section data-section">
+      <div class="section-heading"><div><p class="eyebrow">Клієнтський аналіз</p><h2>Інші ваучери клієнтів</h2></div><p class="section-note">Лише товарні рядки допущених Tax ID, що не входять до основних ваучерів.</p></div>
+      <div class="filters" data-controls="otherProducts">
+        <label>Пошук<input type="search" data-filter="search" placeholder="Ваучер, клієнт, Tax ID, гібрид"></label>
+        <label>Tax ID<select data-filter="taxId"><option value="">Усі</option></select></label>
+        <label>Дата від<input type="date" data-filter="dateFrom"></label>
+        <label>Дата до<input type="date" data-filter="dateTo"></label>
+        <button type="button" class="secondary" data-reset="otherProducts">Скинути</button>
+      </div>
+      <div class="metric-strip" data-metrics="otherProducts"></div>
+      <div class="table-wrap"><table data-table="otherProducts"><thead></thead><tbody></tbody></table></div>
+    </section>
+
+    <section id="issues" class="report-section data-section">
+      <div class="section-heading"><div><p class="eyebrow">Структуровані пояснення</p><h2>Проблеми</h2></div><p class="section-note">Без сирих відповідей, нотаток і значень контактних полів.</p></div>
+      <div class="filters" data-controls="issues">
+        <label>Пошук<input type="search" data-filter="search" placeholder="Код, повідомлення, поле"></label>
+        <label>Рівень<select data-filter="level"><option value="">Усі</option></select></label>
+        <label>Роль<select data-filter="role"><option value="">Усі</option></select></label>
+        <label>Стан<select data-filter="resolved"><option value="">Усі</option><option value="no">Невирішені</option><option value="yes">Вирішені</option></select></label>
+        <button type="button" class="secondary" data-reset="issues">Скинути</button>
+      </div>
+      <div class="metric-strip" data-metrics="issues"></div>
+      <div class="table-wrap"><table data-table="issues"><thead></thead><tbody></tbody></table></div>
+    </section>
+
+    <section id="metadata" class="report-section">
+      <div class="section-heading"><div><p class="eyebrow">Аудит комплекту</p><h2>Метадані</h2></div></div>
+      <dl id="metadata-list" class="metadata-list"></dl>
+      <div class="table-wrap"><table id="source-table"><thead><tr><th>Роль</th><th>Файл</th><th>Аркуш</th><th>Схема</th><th>Рядків</th><th>SHA-256</th></tr></thead><tbody></tbody></table></div>
+    </section>
+  </main>
+
+  <footer>SeedLink · автономний read-only звіт · зовнішні ресурси та мережеві запити не використовуються</footer>
+  <noscript>Для пошуку, фільтрів, сортування та графіків потрібно дозволити JavaScript у цьому локальному файлі.</noscript>
+  <script id="seedlink-data" type="application/json">{{ payload_json }}</script>
+  <script>{{ javascript }}</script>
+</body>
+</html>
