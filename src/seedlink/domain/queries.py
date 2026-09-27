@@ -168,6 +168,20 @@ def _normalized_set(values: tuple[str, ...]) -> set[str]:
     }
 
 
+def link_has_unresolved_issues(
+    result: ReportResult,
+    link: AcceptedLink,
+    summary: LinkSummary,
+) -> bool:
+    """Return the one canonical unresolved-issue flag for a visible pair."""
+
+    related = link_related_keys(link, summary)
+    return any(
+        not issue.is_resolved and bool(related.intersection(issue.affected_keys))
+        for issue in result.issues
+    )
+
+
 def query_funnel(
     result: ReportResult, filters: FunnelFilter = FunnelFilter()
 ) -> FunnelQueryResult:
@@ -347,12 +361,6 @@ def query_lead_vouchers(
     filters: LeadVoucherFilter = LeadVoucherFilter(),
 ) -> LinkQueryResult:
     link_by_key = {item.key: item for item in result.accepted_links}
-    affected = {
-        key
-        for issue in result.issues
-        for key in issue.affected_keys
-        if not issue.is_resolved
-    }
     rows = tuple(
         summary
         for summary in result.link_summaries
@@ -370,10 +378,8 @@ def query_lead_vouchers(
         and (
             filters.has_issues is None
             or filters.has_issues
-            == bool(
-                link_related_keys(link_by_key[summary.link_key], summary).intersection(
-                    affected
-                )
+            == link_has_unresolved_issues(
+                result, link_by_key[summary.link_key], summary
             )
         )
     )

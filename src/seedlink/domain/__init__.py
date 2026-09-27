@@ -80,6 +80,7 @@ from seedlink.domain.queries import (
     query_issues,
     issue_impacts,
     link_related_keys,
+    link_has_unresolved_issues,
     query_other_vouchers,
     query_product_lines,
 )
@@ -162,6 +163,7 @@ __all__ = [
     "query_issues",
     "issue_impacts",
     "link_related_keys",
+    "link_has_unresolved_issues",
     "query_other_vouchers",
     "query_product_lines",
     "quantity_measure",

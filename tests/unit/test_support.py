@@ -65,3 +65,22 @@ def test_redaction_leaves_non_contact_counts_readable():
     )
     assert redact_sensitive("знімок 2026-09-20") == "знімок 2026-09-20"
     assert redact_sensitive("ваучер SE-0123456789/1/АГРО") == "ваучер SE-0123456789/1/АГРО"
+
+
+def test_sensitive_formatter_redacts_exception_traceback(tmp_path):
+    from seedlink.support.logging_setup import configure_logging
+
+    target = tmp_path / "traceback.log"
+    logger = configure_logging(target)
+    try:
+        raise RuntimeError("contact user@example.com or +380 67 123 45 67")
+    except RuntimeError:
+        logger.exception("processing user@example.com")
+    for handler in logger.handlers:
+        handler.flush()
+
+    content = target.read_text(encoding="utf-8")
+    assert "user@example.com" not in content
+    assert "+380 67 123 45 67" not in content
+    assert "[EMAIL REDACTED]" in content
+    assert "[PHONE REDACTED]" in content

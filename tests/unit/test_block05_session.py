@@ -1054,7 +1054,7 @@ def test_manual_evidence_keeps_its_decision_after_other_mention_is_replaced(
     assert manual.decision_id == first_decision.decision_id
 
 
-def test_rejected_decision_restores_generation_for_background_result(
+def test_rejected_decision_rolls_back_shared_command_scope(
     workbook_set_factory,
 ):
     session, automatic = _session(
@@ -1065,11 +1065,13 @@ def test_rejected_decision_restores_generation_for_background_result(
             InputRole.R3: [_r3(MEMBER_A, "Лід", "Один")],
         },
     )
-    generation, state = session._result_state()
+    state_before = session.state
 
     with pytest.raises(DecisionValidationError) as rejected:
         session.select_vouchers(automatic.surveys[0].key, ("missing-voucher",))
     assert rejected.value.code is SessionErrorCode.UNKNOWN_SELECTION
+    assert session.state is state_before
 
-    session._commit(generation, state)
-    assert session.state.report_result == state.report_result
+    revised = session.recalculate()
+    assert revised.revision == 1
+    assert session.state.report_result is revised

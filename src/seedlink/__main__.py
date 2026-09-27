@@ -1,4 +1,4 @@
-"""Minimal package entry point used before the desktop shell is implemented."""
+"""Package entry point for the SeedLink desktop application."""
 
 from __future__ import annotations
 
@@ -21,8 +21,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    build_parser().parse_args(argv)
-    return 0
+    parser = build_parser()
+    parser.parse_args(argv)
+    from seedlink.desktop import run_desktop
+
+    return run_desktop(argv)
 
 
 if __name__ == "__main__":

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
-from dataclasses import replace
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from hashlib import sha256
 from os import PathLike
@@ -43,6 +44,35 @@ from seedlink.input_xlsx.workbook_reader import ImportResult, import_workbooks
 ProgressCallback = Callable[[ProgressUpdate], None]
 
 
+@dataclass(slots=True)
+class _CommandScope:
+    """One optimistic session transaction with an explicit final outcome."""
+
+    session: "SeedLinkSession"
+    version: int
+    state: SessionState
+    outcome: str | None = None
+
+    def commit(
+        self, state: SessionState, *, preserve_export: bool = True
+    ) -> None:
+        if self.outcome is not None:
+            raise SessionStateError(
+                SessionErrorCode.INTERNAL_COMMAND_STATE,
+                "Внутрішня помилка життєвого циклу команди.",
+            )
+        self.session._commit(
+            self.version, state, preserve_export=preserve_export
+        )
+        self.outcome = "committed"
+
+    def rollback(self) -> None:
+        if self.outcome is None:
+            # The optimistic body never mutates committed state. Rollback is
+            # therefore the single, explicit decision to leave it untouched.
+            self.outcome = "rolled_back"
+
+
 class SeedLinkSession:
     """Own one loaded snapshot and its non-persistent manual decisions."""
 
@@ -51,20 +81,40 @@ class SeedLinkSession:
         self._generation = 0
         self._state = SessionState()
 
+    @contextmanager
+    def _command(self) -> Iterator[_CommandScope]:
+        """Run start → body → rollback/commit in one shared wrapper."""
+
+        version, state = self._start()
+        command = _CommandScope(self, version, state)
+        try:
+            yield command
+        except BaseException:
+            command.rollback()
+            raise
+        if command.outcome != "committed":
+            command.rollback()
+            raise SessionStateError(
+                SessionErrorCode.INTERNAL_COMMAND_STATE,
+                "Внутрішня помилка: команда завершилася без фіксації стану.",
+            )
+
     @property
     def state(self) -> SessionState:
         with self._lock:
             return self._state
 
     def _start(self) -> tuple[int, SessionState]:
-        with self._lock:
-            self._generation += 1
-            return self._generation, self._state
+        """Capture the committed state version for an optimistic command.
 
-    def _rollback_generation(self, generation: int) -> None:
+        Merely starting a command must not invalidate another command. In
+        particular, a command rejected during validation cannot make an
+        already running background calculation stale (R06). Only a successful
+        commit or an explicit reset advances the version.
+        """
+
         with self._lock:
-            if self._generation == generation:
-                self._generation -= 1
+            return self._generation, self._state
 
     def _commit(
         self,
@@ -85,6 +135,7 @@ class SeedLinkSession:
                 state,
                 last_exported_calculation_id=exported_id,
             )
+            self._generation += 1
 
     @staticmethod
     def _token(token: CancellationToken | None) -> CancellationToken:
@@ -117,48 +168,52 @@ class SeedLinkSession:
     ) -> ImportResult:
         """Validate a new four-file set and reset all prior session state."""
 
-        generation, _ = self._start()
-        token = self._token(cancellation)
-        self._emit(
-            progress,
-            token,
-            ProgressUpdate(
-                OperationPhase.IMPORTING,
-                "Перевірка вхідних книг.",
-                0,
-                len(InputRole),
-            ),
-        )
-
-        def workbook_loaded(role: InputRole, completed: int, total: int) -> None:
+        with self._command() as command:
+            token = self._token(cancellation)
             self._emit(
                 progress,
                 token,
                 ProgressUpdate(
                     OperationPhase.IMPORTING,
-                    f"Перевірено {role.label_uk}.",
-                    completed,
-                    total,
+                    "Перевірка вхідних книг.",
+                    0,
+                    len(InputRole),
                 ),
             )
 
-        imported = import_workbooks(
-            paths,
-            loaded_at=loaded_at,
-            program_version=program_version,
-            check_cancelled=token.raise_if_cancelled,
-            workbook_loaded=workbook_loaded,
-        )
-        token.raise_if_cancelled()
-        state = SessionState(
-            status=(
-                SessionStatus.IMPORTED
-                if imported.is_accepted
-                else SessionStatus.IMPORT_FAILED
-            ),
-            import_result=imported,
-        )
-        self._commit(generation, state, preserve_export=False)
+            def workbook_loaded(
+                role: InputRole, completed: int, total: int
+            ) -> None:
+                self._emit(
+                    progress,
+                    token,
+                    ProgressUpdate(
+                        OperationPhase.IMPORTING,
+                        f"Перевірено {role.label_uk}.",
+                        completed,
+                        total,
+                    ),
+                )
+
+            imported = import_workbooks(
+                paths,
+                loaded_at=loaded_at,
+                program_version=program_version,
+                check_cancelled=token.raise_if_cancelled,
+                workbook_loaded=workbook_loaded,
+            )
+            token.raise_if_cancelled()
+            command.commit(
+                SessionState(
+                    status=(
+                        SessionStatus.IMPORTED
+                        if imported.is_accepted
+                        else SessionStatus.IMPORT_FAILED
+                    ),
+                    import_result=imported,
+                ),
+                preserve_export=False,
+            )
         self._complete(
             progress,
             "Комплект готовий до розрахунку."
@@ -174,66 +229,69 @@ class SeedLinkSession:
         cancellation: CancellationToken | None = None,
         progress: ProgressCallback | None = None,
     ) -> ReportResult:
-        generation, state = self._start()
-        imported = state.import_result
-        if (
-            state.status is not SessionStatus.IMPORTED
-            or imported is None
-            or not imported.is_accepted
-        ):
-            raise SessionStateError(
-                SessionErrorCode.INVALID_STATE,
-                "Спочатку завантажте й успішно перевірте всі чотири книги.",
+        with self._command() as command:
+            state = command.state
+            imported = state.import_result
+            if (
+                state.status is not SessionStatus.IMPORTED
+                or imported is None
+                or not imported.is_accepted
+            ):
+                raise SessionStateError(
+                    SessionErrorCode.INVALID_STATE,
+                    "Спочатку завантажте й успішно перевірте всі чотири книги.",
+                )
+            token = self._token(cancellation)
+            self._emit(
+                progress,
+                token,
+                ProgressUpdate(OperationPhase.MATCHING, "Зіставлення записів."),
             )
-        token = self._token(cancellation)
-        self._emit(
-            progress,
-            token,
-            ProgressUpdate(OperationPhase.MATCHING, "Зіставлення записів."),
-        )
-        automatic = analyze_links(
-            imported,
-            check_cancelled=token.raise_if_cancelled,
-        )
-        self._emit(
-            progress,
-            token,
-            ProgressUpdate(OperationPhase.CALCULATING, "Розрахунок показників."),
-        )
-        report = build_report_result(
-            automatic,
-            revision=0,
-            calculated_at=calculated_at,
-            check_cancelled=token.raise_if_cancelled,
-        )
-        token.raise_if_cancelled()
-        result_state = SessionState(
-            status=SessionStatus.RESULT,
-            import_result=imported,
-            automatic_result=automatic,
-            report_result=report,
-        )
-        self._commit(generation, result_state)
+            automatic = analyze_links(
+                imported,
+                check_cancelled=token.raise_if_cancelled,
+            )
+            self._emit(
+                progress,
+                token,
+                ProgressUpdate(
+                    OperationPhase.CALCULATING, "Розрахунок показників."
+                ),
+            )
+            report = build_report_result(
+                automatic,
+                revision=0,
+                calculated_at=calculated_at,
+                check_cancelled=token.raise_if_cancelled,
+            )
+            token.raise_if_cancelled()
+            command.commit(
+                SessionState(
+                    status=SessionStatus.RESULT,
+                    import_result=imported,
+                    automatic_result=automatic,
+                    report_result=report,
+                )
+            )
         self._complete(progress, "Розрахунок завершено.")
         return report
 
-    def _result_state(self) -> tuple[int, SessionState]:
-        generation, state = self._start()
+    @staticmethod
+    def _require_result_state(state: SessionState) -> SessionState:
         if (
             state.status is not SessionStatus.RESULT
             or state.automatic_result is None
             or state.report_result is None
         ):
-            self._rollback_generation(generation)
             raise SessionStateError(
                 SessionErrorCode.INVALID_STATE,
                 "Ручне рішення або перерахунок потребує готового результату.",
             )
-        return generation, state
+        return state
 
     def _run_revision(
         self,
-        generation: int,
+        command: _CommandScope,
         state: SessionState,
         decisions: tuple[ManualDecision, ...],
         *,
@@ -244,7 +302,6 @@ class SeedLinkSession:
         progress: ProgressCallback | None,
     ) -> ReportResult:
         if state.automatic_result is None or state.import_result is None:
-            self._rollback_generation(generation)
             raise SessionStateError(
                 SessionErrorCode.INVALID_STATE,
                 "Перерахунок потребує готового автоматичного результату.",
@@ -290,19 +347,15 @@ class SeedLinkSession:
                 ),
             )
 
-        try:
-            report = recalculate_with_decisions(
-                state.automatic_result,
-                decisions,
-                revision=revision,
-                calculated_at=calculated_at,
-                check_cancelled=token.raise_if_cancelled,
-                decisions_applied=after_decisions,
-            )
-            token.raise_if_cancelled()
-        except BaseException:
-            self._rollback_generation(generation)
-            raise
+        report = recalculate_with_decisions(
+            state.automatic_result,
+            decisions,
+            revision=revision,
+            calculated_at=calculated_at,
+            check_cancelled=token.raise_if_cancelled,
+            decisions_applied=after_decisions,
+        )
+        token.raise_if_cancelled()
         new_state = SessionState(
             status=SessionStatus.RESULT,
             import_result=state.import_result,
@@ -311,8 +364,7 @@ class SeedLinkSession:
             decisions=decisions,
             next_decision_sequence=next_sequence,
         )
-        self._commit(generation, new_state)
-        self._complete(progress, f"Готова ревізія {revision}.")
+        command.commit(new_state)
         return report
 
     def recalculate(
@@ -322,18 +374,21 @@ class SeedLinkSession:
         cancellation: CancellationToken | None = None,
         progress: ProgressCallback | None = None,
     ) -> ReportResult:
-        generation, state = self._result_state()
-        assert state.report_result is not None
-        return self._run_revision(
-            generation,
-            state,
-            state.decisions,
-            revision=state.report_result.revision + 1,
-            next_sequence=state.next_decision_sequence,
-            calculated_at=calculated_at,
-            cancellation=cancellation,
-            progress=progress,
-        )
+        with self._command() as command:
+            state = self._require_result_state(command.state)
+            assert state.report_result is not None
+            report = self._run_revision(
+                command,
+                state,
+                state.decisions,
+                revision=state.report_result.revision + 1,
+                next_sequence=state.next_decision_sequence,
+                calculated_at=calculated_at,
+                cancellation=cancellation,
+                progress=progress,
+            )
+        self._complete(progress, f"Готова ревізія {report.revision}.")
+        return report
 
     @staticmethod
     def _keys(values: Iterable[str], field_name: str) -> tuple[str, ...]:
@@ -505,25 +560,20 @@ class SeedLinkSession:
         cancellation: CancellationToken | None = None,
         progress: ProgressCallback | None = None,
     ) -> ReportResult:
-        generation, state = self._result_state()
-        assert state.automatic_result is not None
-        assert state.report_result is not None
-        if not isinstance(target, DecisionTarget) or not isinstance(
-            action, DecisionAction
-        ):
-            self._rollback_generation(generation)
-            raise DecisionValidationError(
-                SessionErrorCode.INVALID_DECISION,
-                "Тип цілі або дії ручного рішення не підтримується.",
-            )
-        if target is DecisionTarget.SURVEY_PARTICIPANT:
-            try:
+        with self._command() as command:
+            state = self._require_result_state(command.state)
+            assert state.automatic_result is not None
+            assert state.report_result is not None
+            if not isinstance(target, DecisionTarget) or not isinstance(
+                action, DecisionAction
+            ):
+                raise DecisionValidationError(
+                    SessionErrorCode.INVALID_DECISION,
+                    "Тип цілі або дії ручного рішення не підтримується.",
+                )
+            if target is DecisionTarget.SURVEY_PARTICIPANT:
                 target_key = self._lead_ref_for_survey(state, target_key)
-            except BaseException:
-                self._rollback_generation(generation)
-                raise
-            target = DecisionTarget.LEAD_REF_PARTICIPANT
-        try:
+                target = DecisionTarget.LEAD_REF_PARTICIPANT
             selected = self._keys(selected_keys, "selected_keys")
             supplied_mentions = (
                 self._keys(mention_keys, "mention_keys")
@@ -541,62 +591,60 @@ class SeedLinkSession:
                 if target is DecisionTarget.VOUCHER_CASE
                 else supplied_mentions or ()
             )
-        except BaseException:
-            self._rollback_generation(generation)
-            raise
-        timestamp = created_at or datetime.now(UTC)
-        normalized_reason = (
-            (reason.strip() or None) if reason is not None else None
-        )
-        try:
-            decision = ManualDecision(
-                decision_id=self._decision_id(
-                    state.automatic_result.snapshot_id,
-                    state.next_decision_sequence,
-                    target,
-                    target_key,
-                    action,
-                    selected,
-                    scoped_mentions,
-                    timestamp,
-                ),
-                target=target,
-                target_key=target_key,
-                action=action,
-                selected_keys=selected,
-                reason=normalized_reason,
-                sequence=state.next_decision_sequence,
-                created_at=timestamp,
-                mention_keys=scoped_mentions,
+            timestamp = created_at or datetime.now(UTC)
+            normalized_reason = (
+                (reason.strip() or None) if reason is not None else None
             )
-        except ValueError as error:
-            self._rollback_generation(generation)
-            raise DecisionValidationError(
-                SessionErrorCode.INVALID_DECISION,
-                f"Некоректне ручне рішення: {error}.",
-            ) from error
+            try:
+                decision = ManualDecision(
+                    decision_id=self._decision_id(
+                        state.automatic_result.snapshot_id,
+                        state.next_decision_sequence,
+                        target,
+                        target_key,
+                        action,
+                        selected,
+                        scoped_mentions,
+                        timestamp,
+                    ),
+                    target=target,
+                    target_key=target_key,
+                    action=action,
+                    selected_keys=selected,
+                    reason=normalized_reason,
+                    sequence=state.next_decision_sequence,
+                    created_at=timestamp,
+                    mention_keys=scoped_mentions,
+                )
+            except ValueError as error:
+                raise DecisionValidationError(
+                    SessionErrorCode.INVALID_DECISION,
+                    f"Некоректне ручне рішення: {error}.",
+                ) from error
 
-        def is_replaced(item: ManualDecision) -> bool:
-            if (item.target, item.target_key) != (target, target_key):
-                return False
-            if target is not DecisionTarget.VOUCHER_CASE:
-                return True
-            return frozenset(item.mention_keys) == frozenset(scoped_mentions)
+            def is_replaced(item: ManualDecision) -> bool:
+                if (item.target, item.target_key) != (target, target_key):
+                    return False
+                if target is not DecisionTarget.VOUCHER_CASE:
+                    return True
+                return frozenset(item.mention_keys) == frozenset(scoped_mentions)
 
-        decisions = tuple(
-            item for item in state.decisions if not is_replaced(item)
-        ) + (decision,)
-        decisions = tuple(sorted(decisions, key=lambda item: item.sequence))
-        return self._run_revision(
-            generation,
-            state,
-            decisions,
-            revision=state.report_result.revision + 1,
-            next_sequence=state.next_decision_sequence + 1,
-            calculated_at=calculated_at,
-            cancellation=cancellation,
-            progress=progress,
-        )
+            decisions = tuple(
+                item for item in state.decisions if not is_replaced(item)
+            ) + (decision,)
+            decisions = tuple(sorted(decisions, key=lambda item: item.sequence))
+            report = self._run_revision(
+                command,
+                state,
+                decisions,
+                revision=state.report_result.revision + 1,
+                next_sequence=state.next_decision_sequence + 1,
+                calculated_at=calculated_at,
+                cancellation=cancellation,
+                progress=progress,
+            )
+        self._complete(progress, f"Готова ревізія {report.revision}.")
+        return report
 
     def select_vouchers(
         self,
@@ -676,28 +724,30 @@ class SeedLinkSession:
         cancellation: CancellationToken | None = None,
         progress: ProgressCallback | None = None,
     ) -> ReportResult:
-        generation, state = self._result_state()
-        assert state.report_result is not None
-        decisions = tuple(
-            item for item in state.decisions if item.decision_id != decision_id
-        )
-        if len(decisions) == len(state.decisions):
-            self._rollback_generation(generation)
-            raise DecisionValidationError(
-                SessionErrorCode.DECISION_NOT_FOUND,
-                "Активне ручне рішення для скасування не знайдено.",
-                details=(("decision_id", decision_id),),
+        with self._command() as command:
+            state = self._require_result_state(command.state)
+            assert state.report_result is not None
+            decisions = tuple(
+                item for item in state.decisions if item.decision_id != decision_id
             )
-        return self._run_revision(
-            generation,
-            state,
-            decisions,
-            revision=state.report_result.revision + 1,
-            next_sequence=state.next_decision_sequence,
-            calculated_at=calculated_at,
-            cancellation=cancellation,
-            progress=progress,
-        )
+            if len(decisions) == len(state.decisions):
+                raise DecisionValidationError(
+                    SessionErrorCode.DECISION_NOT_FOUND,
+                    "Активне ручне рішення для скасування не знайдено.",
+                    details=(("decision_id", decision_id),),
+                )
+            report = self._run_revision(
+                command,
+                state,
+                decisions,
+                revision=state.report_result.revision + 1,
+                next_sequence=state.next_decision_sequence,
+                calculated_at=calculated_at,
+                cancellation=cancellation,
+                progress=progress,
+            )
+        self._complete(progress, f"Готова ревізія {report.revision}.")
+        return report
 
     def mark_exported(self, calculation_id: str) -> None:
         with self._lock:

@@ -32,6 +32,13 @@ class SensitiveDataFilter(logging.Filter):
         return True
 
 
+class SensitiveFormatter(logging.Formatter):
+    """Redact the fully formatted record, including exception tracebacks."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact_sensitive(super().format(record))
+
+
 def configure_logging(
     path: Path | None = None, *, level: int = logging.INFO
 ) -> logging.Logger:
@@ -51,7 +58,7 @@ def configure_logging(
     )
     handler.addFilter(SensitiveDataFilter())
     handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+        SensitiveFormatter("%(asctime)s %(levelname)s %(name)s %(message)s")
     )
     logger.addHandler(handler)
     return logger
