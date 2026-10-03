@@ -471,6 +471,7 @@ def test_manual_decision_dialog_validates_and_preserves_state(
     dialog.accept()
     assert dialog.result() == QDialog.DialogCode.Accepted
     request = dialog.request()
+    assert request.action is DecisionAction.SELECT
     assert request.selected_keys == ("voucher:2",)
     assert request.mention_keys == ("mention:1", "mention:2")
     dialog.deleteLater()

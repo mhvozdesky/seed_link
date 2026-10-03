@@ -480,7 +480,10 @@ class ManualDecisionDialog(QDialog):
         return DecisionRequest(
             target=self.context.target,
             target_key=self.context.target_key,
-            action=self.action.currentData(),
+            # Qt stores StrEnum values as plain strings in item data. Restore
+            # the domain enum before passing the request to SeedLinkSession,
+            # whose public boundary deliberately rejects untyped actions.
+            action=DecisionAction(self.action.currentData()),
             selected_keys=self._selected_keys(),
             mention_keys=self._scope_keys(),
             reason=reason,
