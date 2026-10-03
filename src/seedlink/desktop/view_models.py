@@ -58,6 +58,7 @@ PERSON_METHOD_LABELS = {
 class ViewRow:
     values: dict[str, Any]
     detail: str
+    subject: object | None = None
 
 
 def decimal_text(value: Decimal | None) -> str:
@@ -162,6 +163,7 @@ def build_link_rows(
                     "issues": "Є" if has_issue else "Немає",
                 },
                 detail,
+                summary,
             )
         )
     return tuple(rows)
@@ -201,6 +203,7 @@ def build_fact_rows(
                     "bucket": TIME_LABELS[fact.time_bucket],
                 },
                 detail,
+                fact,
             )
         )
     return tuple(rows)
@@ -259,6 +262,7 @@ def build_participant_rows(
                     "voucher": item.has_confirmed_voucher,
                 },
                 detail,
+                item,
             )
         )
     return tuple(rows)
@@ -294,6 +298,7 @@ def build_issue_rows(issues: tuple[Issue, ...]) -> tuple[ViewRow, ...]:
                     "source": source_summary,
                 },
                 "\n".join(detail_lines),
+                issue,
             )
         )
     return tuple(rows)

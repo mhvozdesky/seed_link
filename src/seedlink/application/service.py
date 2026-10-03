@@ -623,10 +623,10 @@ class SeedLinkSession:
                 ) from error
 
             def is_replaced(item: ManualDecision) -> bool:
-                if (item.target, item.target_key) != (target, target_key):
+                if item.target is not target:
                     return False
                 if target is not DecisionTarget.VOUCHER_CASE:
-                    return True
+                    return item.target_key == target_key
                 return frozenset(item.mention_keys) == frozenset(scoped_mentions)
 
             decisions = tuple(

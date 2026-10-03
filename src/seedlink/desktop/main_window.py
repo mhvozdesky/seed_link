@@ -1,4 +1,4 @@
-"""Main Qt Widgets window for Block 08 import, calculation and review."""
+"""Main Qt Widgets window for Block 08/09 review and export workflows."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ from dataclasses import replace
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QEventLoop, QTimer, Qt, Slot
+from PySide6.QtCore import QEventLoop, QTimer, QUrl, Qt, Slot
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -27,15 +28,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from seedlink.application import SeedLinkSession
+from seedlink.application import ExportBundle, ExportService, SeedLinkSession
 from seedlink.application.errors import (
+    DecisionValidationError,
     OperationCancelled,
     SessionError,
     StaleOperationError,
 )
 from seedlink.application.state import ProgressUpdate, SessionStatus
-from seedlink.domain.issues import IssueLevel
+from seedlink.domain.issues import Issue, IssueLevel
 from seedlink.domain.models import (
+    AcceptedLink,
     CropCategory,
     ReportResult,
     TimeBucket,
@@ -58,6 +61,12 @@ from seedlink.domain.queries import (
 )
 from seedlink.desktop.async_commands import AsyncCommandController
 from seedlink.desktop.table_models import Column, ObjectTableModel
+from seedlink.desktop.manual_review import (
+    DecisionRequest,
+    ManualDecisionDialog,
+    review_context_for_issue,
+    review_context_for_link,
+)
 from seedlink.desktop.widgets import BarChart, FileSlot, MetricCard, TablePane
 from seedlink.support.paths import diagnostic_log_path
 from seedlink.support.settings import AppSettings, load_settings, save_settings
@@ -122,17 +131,22 @@ class SeedLinkMainWindow(QMainWindow):
         session: SeedLinkSession | None = None,
         *,
         settings: AppSettings | None = None,
+        export_service: ExportService | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.session = session or SeedLinkSession()
         self.settings = settings or load_settings()
+        self.export_service = export_service or ExportService()
         self.paths: dict[InputRole, Path] = {}
         self._verified_paths: dict[InputRole, Path] | None = None
         self.result: ReportResult | None = None
         self._operation_kind: dict[int, str] = {}
+        self._decision_dialogs: dict[int, ManualDecisionDialog] = {}
         self._closing = False
         self._last_input_dir = self.settings.last_input_dir
+        self._last_output_dir = self.settings.last_output_dir
+        self._last_bundle: ExportBundle | None = None
         self.controller = AsyncCommandController(self)
         self.controller.started.connect(self._operation_started)
         self.controller.progress.connect(self._progress_updated)
@@ -194,6 +208,8 @@ class SeedLinkMainWindow(QMainWindow):
         self.calculate_button = QPushButton("Розрахувати")
         self.calculate_button.setObjectName("primaryButton")
         self.calculate_button.clicked.connect(self.calculate)
+        self.export_button = QPushButton("Зберегти комплект…")
+        self.export_button.clicked.connect(self.export_reports)
         self.cancel_button = QPushButton("Скасувати операцію")
         self.cancel_button.clicked.connect(self.controller.cancel)
         self.cancel_button.setVisible(False)
@@ -203,9 +219,26 @@ class SeedLinkMainWindow(QMainWindow):
         self.progress.setMinimumWidth(260)
         actions.addWidget(self.validate_button)
         actions.addWidget(self.calculate_button)
+        actions.addWidget(self.export_button)
         actions.addWidget(self.cancel_button)
         actions.addWidget(self.progress, 1)
         root.addLayout(actions)
+
+        export_bar = QHBoxLayout()
+        self.export_state_label = QLabel("Поточну ревізію ще не збережено")
+        self.export_state_label.setObjectName("exportContext")
+        self.export_state_label.setWordWrap(True)
+        self.open_excel_button = QPushButton("Відкрити Excel")
+        self.open_excel_button.clicked.connect(self._open_excel)
+        self.open_html_button = QPushButton("Відкрити HTML")
+        self.open_html_button.clicked.connect(self._open_html)
+        self.open_folder_button = QPushButton("Відкрити папку")
+        self.open_folder_button.clicked.connect(self._open_export_folder)
+        export_bar.addWidget(self.export_state_label, 1)
+        export_bar.addWidget(self.open_excel_button)
+        export_bar.addWidget(self.open_html_button)
+        export_bar.addWidget(self.open_folder_button)
+        root.addLayout(export_bar)
 
         self.result_context = QLabel()
         self.result_context.setObjectName("resultContext")
@@ -275,6 +308,9 @@ class SeedLinkMainWindow(QMainWindow):
         self.link_issue.currentIndexChanged.connect(self._refresh_links)
         self.link_pane.add_control(self.link_method)
         self.link_pane.add_control(self.link_issue)
+        self.review_link_button = QPushButton("Уточнити вибраний зв’язок…")
+        self.review_link_button.clicked.connect(self._review_selected_link)
+        self.link_pane.add_control(self.review_link_button)
         tabs.addTab(self.link_pane, "Ліди–ваучери")
 
         self.product_model = ObjectTableModel(
@@ -362,6 +398,15 @@ class SeedLinkMainWindow(QMainWindow):
         self.issue_state.currentIndexChanged.connect(self._refresh_issues)
         self.issue_pane.add_control(self.issue_level)
         self.issue_pane.add_control(self.issue_state)
+        self.review_issue_button = QPushButton("Розглянути вибрану проблему…")
+        self.review_issue_button.clicked.connect(self._review_selected_issue)
+        self.decision_combo = QComboBox()
+        self.decision_combo.setMinimumWidth(260)
+        self.undo_button = QPushButton("Скасувати рішення")
+        self.undo_button.clicked.connect(self._undo_selected_decision)
+        self.issue_pane.add_control(self.review_issue_button)
+        self.issue_pane.add_control(self.decision_combo)
+        self.issue_pane.add_control(self.undo_button)
         return self.issue_pane
 
     @staticmethod
@@ -380,6 +425,7 @@ class SeedLinkMainWindow(QMainWindow):
             QLabel#subtitle { color: #5d6d7e; }
             QLabel#stateBadge { padding: 7px 12px; background: #e9f1f8; border-radius: 8px; font-weight: 600; }
             QLabel#resultContext { padding: 9px 12px; color: #704800; background: #fff3cd; border: 1px solid #e0bd62; border-radius: 7px; font-weight: 600; }
+            QLabel#exportContext { color: #526579; font-weight: 600; }
             QFrame#fileSlot { background: white; border: 1px solid #c9d4df; border-radius: 9px; }
             QFrame#fileSlot[slotState="accepted"] { border: 2px solid #2e7d5b; }
             QFrame#fileSlot[slotState="error"] { border: 2px solid #b63d3d; }
@@ -498,6 +544,10 @@ class SeedLinkMainWindow(QMainWindow):
 
     @Slot(object, str)
     def _set_role_path(self, role: InputRole, path: str) -> None:
+        if self._has_unexported_decisions() and not self._confirm_discard_decisions(
+            "Заміна файла почне новий комплект після повторної перевірки."
+        ):
+            return
         selected = Path(path)
         self._verified_paths = None
         self.paths[role] = selected
@@ -505,6 +555,7 @@ class SeedLinkMainWindow(QMainWindow):
         self.file_slots[role].set_path(selected)
         self.state_label.setText("Комплект змінено — потрібна перевірка")
         self._update_result_context()
+        self._update_export_context()
 
         self._refresh_actions()
 
@@ -579,12 +630,24 @@ class SeedLinkMainWindow(QMainWindow):
     @Slot(int, object)
     def _operation_succeeded(self, operation_id: int, value: object) -> None:
         kind = self._operation_kind.get(operation_id)
+        dialog = self._decision_dialogs.pop(operation_id, None)
+        if dialog is not None:
+            dialog.deleteLater()
         if kind == "import" and isinstance(value, tuple) and len(value) == 2:
             imported, validated_paths = value
             self._show_import_result(imported, validated_paths)
-        elif kind == "analyze" and isinstance(value, ReportResult):
+        elif kind in {"analyze", "decision", "undo"} and isinstance(
+            value, ReportResult
+        ):
             self.result = value
             self._show_report(value)
+        elif kind == "export" and isinstance(value, ExportBundle):
+            self._last_bundle = value
+            self.state_label.setText(f"Збережено ревізію {value.revision}")
+            self.statusBar().showMessage(
+                f"Готовий комплект: {value.directory}"
+            )
+            self._update_export_context()
 
     def _show_import_result(
         self,
@@ -634,6 +697,7 @@ class SeedLinkMainWindow(QMainWindow):
                 "Виправте позначені файли й повторіть перевірку."
             )
         self._update_result_context()
+        self._update_export_context()
 
     def _show_report(self, result: ReportResult) -> None:
         self.tabs.setEnabled(True)
@@ -649,31 +713,58 @@ class SeedLinkMainWindow(QMainWindow):
         self._refresh_participants()
         self._refresh_issues()
         self._update_result_context()
+        self._refresh_decisions()
+        self._update_export_context()
 
     @Slot(int, object)
     def _operation_failed(self, operation_id: int, error: object) -> None:
-        del operation_id
+        dialog = self._decision_dialogs.pop(operation_id, None)
         if isinstance(error, OperationCancelled):
+            if dialog is not None:
+                dialog.deleteLater()
             self.state_label.setText(
                 "Операцію скасовано; попередній стан збережено"
             )
             self.statusBar().showMessage(error.message_uk)
             self._update_result_context()
+            self._update_export_context()
             return
         if isinstance(error, StaleOperationError):
+            if dialog is not None:
+                dialog.deleteLater()
             self.state_label.setText("Застарілий результат операції відкинуто")
             self.statusBar().showMessage(error.message_uk)
             self._update_result_context()
+            self._update_export_context()
             return
         message = (
             error.message_uk
             if isinstance(error, SessionError)
             else "Не вдалося завершити операцію. Деталі записано в діагностику."
         )
-        if not self._closing:
-            QMessageBox.critical(self, "SeedLink — помилка", message)
-        self.state_label.setText("Помилка операції; перевірте повідомлення")
+        if isinstance(error, DecisionValidationError):
+            details = dict(error.details)
+            available = tuple(
+                key.strip()
+                for key in details.get("available_mention_keys", "").split(",")
+                if key.strip()
+            )
+            if available:
+                message += f"\n\nДоступних згадок у картці: {len(available)}."
+            if dialog is not None and not self._closing:
+                dialog.show_validation_error(message)
+                QTimer.singleShot(0, lambda: self._run_manual_dialog(dialog))
+            elif not self._closing:
+                QMessageBox.warning(self, "Уточніть ручне рішення", message)
+            self.state_label.setText("Ручне рішення не застосовано")
+        else:
+            if dialog is not None:
+                dialog.deleteLater()
+            if not self._closing:
+                QMessageBox.critical(self, "SeedLink — помилка", message)
+            self.state_label.setText("Помилка операції; перевірте повідомлення")
         self._update_result_context()
+        self._update_export_context()
 
     @Slot(int)
     def _operation_finished(self, operation_id: int) -> None:
@@ -687,11 +778,36 @@ class SeedLinkMainWindow(QMainWindow):
     def _refresh_actions(self) -> None:
         running = self.controller.is_running
         complete_selection = set(self.paths) == set(InputRole)
+        current = self.session.state.report_result
+        active_result = (
+            self.result is not None
+            and current is not None
+            and self.result.calculation_id == current.calculation_id
+            and self._paths_are_verified()
+        )
         self.validate_button.setEnabled(not running and complete_selection)
         self.calculate_button.setEnabled(
             not running
             and self.session.state.status is SessionStatus.IMPORTED
             and self._paths_are_verified()
+        )
+        self.export_button.setEnabled(not running and active_result)
+        self.review_link_button.setEnabled(not running and active_result)
+        self.review_issue_button.setEnabled(not running and active_result)
+        self.undo_button.setEnabled(
+            not running
+            and active_result
+            and self.decision_combo.currentData() is not None
+        )
+        bundle = self._last_bundle
+        self.open_excel_button.setEnabled(
+            not running and bundle is not None and bundle.excel_path.is_file()
+        )
+        self.open_html_button.setEnabled(
+            not running and bundle is not None and bundle.html_path.is_file()
+        )
+        self.open_folder_button.setEnabled(
+            not running and bundle is not None and bundle.directory.is_dir()
         )
         for slot in self.file_slots.values():
             slot.setEnabled(not running)
@@ -822,6 +938,229 @@ class SeedLinkMainWindow(QMainWindow):
         self.issue_model.set_rows(build_issue_rows(queried.rows))
         self.issue_pane.summary.setText(query_summary(queried.measures))
 
+    def _has_unexported_decisions(self) -> bool:
+        state = self.session.state
+        return bool(state.decisions) and not state.export_is_current
+
+    def _confirm_discard_decisions(self, consequence: str) -> bool:
+        answer = QMessageBox.question(
+            self,
+            "Незбережені ручні рішення",
+            "Поточна ревізія містить ручні рішення, які ще не збережено "
+            "в Excel та HTML. " + consequence + " Продовжити?",
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    @staticmethod
+    def _selected_subject(pane: TablePane) -> object | None:
+        row = pane.selected_object()
+        return getattr(row, "subject", None) if row is not None else None
+
+    @Slot()
+    def _review_selected_issue(self) -> None:
+        result = self.result
+        issue = self._selected_subject(self.issue_pane)
+        if result is None or not isinstance(issue, Issue):
+            QMessageBox.information(
+                self,
+                "Ручна перевірка",
+                "Спочатку виберіть проблему в таблиці.",
+            )
+            return
+        try:
+            context = review_context_for_issue(result, issue)
+        except ValueError as error:
+            QMessageBox.information(self, "Ручна перевірка", str(error))
+            return
+        self._run_manual_dialog(ManualDecisionDialog(context, self))
+
+    @Slot()
+    def _review_selected_link(self) -> None:
+        result = self.result
+        subject = self._selected_subject(self.link_pane)
+        link_key = getattr(subject, "link_key", None)
+        link = (
+            next(
+                (item for item in result.accepted_links if item.key == link_key),
+                None,
+            )
+            if result is not None and link_key is not None
+            else None
+        )
+        if result is None or not isinstance(link, AcceptedLink):
+            QMessageBox.information(
+                self,
+                "Ручна перевірка",
+                "Спочатку виберіть зв’язок ліда з ваучером.",
+            )
+            return
+        self._run_manual_dialog(
+            ManualDecisionDialog(review_context_for_link(result, link), self)
+        )
+
+    def _run_manual_dialog(self, dialog: ManualDecisionDialog) -> None:
+        if self._closing:
+            dialog.deleteLater()
+            return
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._apply_manual_request(dialog.request(), dialog)
+        else:
+            dialog.deleteLater()
+
+    def _apply_manual_request(
+        self,
+        request: DecisionRequest,
+        dialog: ManualDecisionDialog | None = None,
+    ) -> None:
+        operation_id = self.controller.start(
+            "Застосування ручного рішення",
+            lambda token, progress: self.session.apply_decision(
+                request.target,
+                request.target_key,
+                request.action,
+                selected_keys=request.selected_keys,
+                mention_keys=request.mention_keys,
+                reason=request.reason,
+                cancellation=token,
+                progress=progress,
+            ),
+        )
+        self._operation_kind[operation_id] = "decision"
+        if dialog is not None:
+            self._decision_dialogs[operation_id] = dialog
+
+    @Slot()
+    def _undo_selected_decision(self) -> None:
+        decision_id = self.decision_combo.currentData()
+        if not decision_id:
+            return
+        operation_id = self.controller.start(
+            "Скасування ручного рішення",
+            lambda token, progress: self.session.undo_decision(
+                decision_id,
+                cancellation=token,
+                progress=progress,
+            ),
+        )
+        self._operation_kind[operation_id] = "undo"
+
+    def _refresh_decisions(self) -> None:
+        current_id = self.decision_combo.currentData()
+        self.decision_combo.blockSignals(True)
+        self.decision_combo.clear()
+        decisions = self.session.state.decisions
+        if not decisions:
+            self.decision_combo.addItem("Ручних рішень немає", None)
+        else:
+            action_labels = {
+                "select": "підтверджено",
+                "reject": "відхилено",
+                "leave_unresolved": "залишено невирішеним",
+            }
+            for decision in decisions:
+                scope = (
+                    f" · згадок: {len(decision.mention_keys)}"
+                    if decision.mention_keys
+                    else ""
+                )
+                label = (
+                    f"#{decision.sequence} {action_labels[decision.action.value]} "
+                    f"· {decision.target.value}{scope}"
+                )
+                self.decision_combo.addItem(label, decision.decision_id)
+            restored = self.decision_combo.findData(current_id)
+            if restored >= 0:
+                self.decision_combo.setCurrentIndex(restored)
+        self.decision_combo.blockSignals(False)
+
+    @Slot()
+    def export_reports(self) -> None:
+        result = self.result
+        current = self.session.state.report_result
+        if (
+            result is None
+            or current is None
+            or result.calculation_id != current.calculation_id
+            or not self._paths_are_verified()
+        ):
+            return
+        start = self._last_output_dir or self._last_input_dir or str(Path.home())
+        destination = QFileDialog.getExistingDirectory(
+            self,
+            "Виберіть папку для нового комплекту SeedLink",
+            start,
+        )
+        if not destination:
+            return
+        self._last_output_dir = destination
+
+        def export_command(token, progress):
+            bundle = self.export_service.export(
+                result,
+                destination,
+                cancellation=token,
+                progress=progress,
+            )
+            self.session.mark_exported(result.calculation_id)
+            return bundle
+
+        operation_id = self.controller.start(
+            "Збереження Excel та HTML",
+            export_command,
+        )
+        self._operation_kind[operation_id] = "export"
+
+    def _update_export_context(self) -> None:
+        state = self.session.state
+        if state.report_result is None:
+            text = "Поточний результат ще не збережено."
+        elif state.export_is_current:
+            text = f"Ревізію {state.report_result.revision} збережено в Excel та HTML."
+        elif state.has_stale_export:
+            text = (
+                "Збережений комплект стосується попередньої ревізії; "
+                "поточні ручні рішення ще не експортовано."
+            )
+        else:
+            text = f"Ревізію {state.report_result.revision} ще не збережено."
+        if self._last_bundle is not None:
+            text += f" Остання папка: {self._last_bundle.directory.name}."
+        self.export_state_label.setText(text)
+
+    def _open_path(self, path: Path | None) -> None:
+        if path is None or not path.exists():
+            QMessageBox.warning(
+                self,
+                "Файл недоступний",
+                "Збережений файл або папку більше не знайдено.",
+            )
+            self._refresh_actions()
+            return
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve()))):
+            QMessageBox.warning(
+                self,
+                "Не вдалося відкрити",
+                "Система не змогла відкрити вибраний файл або папку.",
+            )
+
+    @Slot()
+    def _open_excel(self) -> None:
+        self._open_path(
+            self._last_bundle.excel_path if self._last_bundle is not None else None
+        )
+
+    @Slot()
+    def _open_html(self) -> None:
+        self._open_path(
+            self._last_bundle.html_path if self._last_bundle is not None else None
+        )
+
+    @Slot()
+    def _open_export_folder(self) -> None:
+        self._open_path(
+            self._last_bundle.directory if self._last_bundle is not None else None
+        )
+
     @Slot()
     def _show_diagnostics(self) -> None:
         DiagnosticsDialog(self).exec()
@@ -883,9 +1222,16 @@ class SeedLinkMainWindow(QMainWindow):
                 )
                 event.ignore()
                 return
+        if self._has_unexported_decisions() and not self._confirm_discard_decisions(
+            "Закриття програми видалить ці рішення з пам’яті."
+        ):
+            self._closing = False
+            event.ignore()
+            return
         updated = replace(
             self.settings,
             last_input_dir=self._last_input_dir,
+            last_output_dir=self._last_output_dir,
             window_width=max(self.width(), 640),
             window_height=max(self.height(), 480),
         )

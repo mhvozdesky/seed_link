@@ -36,7 +36,7 @@ from seedlink.domain.voucher_matching import (
 )
 
 
-_PERSON_ISSUE_CODES = frozenset(
+PERSON_DECISION_ISSUE_CODES = frozenset(
     {
         IssueCode.PERSON_LINK_AMBIGUOUS,
         IssueCode.PERSON_LINK_CONFLICT,
@@ -219,14 +219,12 @@ def _validate_voucher_decision(
             details=(("voucher_keys", ", ".join(sorted(missing_vouchers))),),
         )
 
-    survey_mentions = context.mentions_by_survey.get(survey.key, ())
-    survey_mention_keys = {item.key for item in survey_mentions}
     scoped_keys = set(decision.mention_keys)
-    invalid_mentions = scoped_keys - survey_mention_keys
+    invalid_mentions = scoped_keys - context.mention_by_key.keys()
     if invalid_mentions:
         _decision_error(
             SessionErrorCode.UNKNOWN_SELECTION,
-            "Область рішення містить згадку з іншого Survey або комплекту.",
+            "Область рішення містить згадку з іншого комплекту.",
             details=(("mention_keys", ", ".join(sorted(invalid_mentions))),),
         )
     if not scoped_keys:
@@ -238,6 +236,19 @@ def _validate_voucher_decision(
     scoped_mentions = tuple(
         context.mention_by_key[key] for key in decision.mention_keys
     )
+    scoped_survey_keys = {mention.survey_key for mention in scoped_mentions}
+    if survey.key not in scoped_survey_keys:
+        _decision_error(
+            SessionErrorCode.INVALID_DECISION,
+            "Область рішення має містити згадку цільового Survey.",
+        )
+    if len(scoped_survey_keys) > 1:
+        lead_ref_keys = {mention.lead_ref_key for mention in scoped_mentions}
+        if None in lead_ref_keys or len(lead_ref_keys) != 1:
+            _decision_error(
+                SessionErrorCode.INVALID_DECISION,
+                "Згадки кількох Survey можна об'єднати лише для одного ліда.",
+            )
     if decision.action is DecisionAction.SELECT and not any(
         mention.lead_ref_key is not None for mention in scoped_mentions
     ):
@@ -313,7 +324,7 @@ def _validate_person_decision(
     affected = {subject_key for _, subject_key in subjects}
     allowed = set(automatic)
     for issue in _issues_for_keys(context, affected):
-        if issue.code in _PERSON_ISSUE_CODES:
+        if issue.code in PERSON_DECISION_ISSUE_CODES:
             allowed.update(issue.candidate_keys)
     if decision.action is DecisionAction.SELECT:
         _require_reason(decision, not set(decision.selected_keys).issubset(allowed))
@@ -372,7 +383,7 @@ def _validate_manual_decisions(
     person_owner: dict[
         tuple[ParticipantLinkSubject, str], ManualDecision
     ] = {}
-    voucher_owner: dict[tuple[str, str], ManualDecision] = {}
+    voucher_owner: dict[str, ManualDecision] = {}
     for decision in decisions:
         if not isinstance(decision.target, DecisionTarget) or not isinstance(
             decision.action, DecisionAction
@@ -384,8 +395,7 @@ def _validate_manual_decisions(
         if decision.target is DecisionTarget.VOUCHER_CASE:
             _validate_voucher_decision(context, decision)
             for mention_key in decision.mention_keys:
-                scope = (decision.target_key, mention_key)
-                owner = voucher_owner.get(scope)
+                owner = voucher_owner.get(mention_key)
                 if owner is not None:
                     overlap = tuple(
                         key
@@ -397,7 +407,7 @@ def _validate_manual_decisions(
                         owner,
                         overlapping_mentions=overlap,
                     )
-                voucher_owner[scope] = decision
+                voucher_owner[mention_key] = decision
             continue
 
         _validate_person_decision(context, decision)
@@ -517,7 +527,7 @@ def _apply_voucher_decision(
             manual_evidence = tuple(
                 VoucherMatchEvidence(
                     mention_key=mention.key,
-                    survey_key=decision.target_key,
+                    survey_key=mention.survey_key,
                     method=VoucherMatchMethod.MANUAL,
                     decision_id=decision.decision_id,
                 )
@@ -528,7 +538,9 @@ def _apply_voucher_decision(
                     key=accepted_link_key(*pair),
                     lead_ref_key=lead_ref_key,
                     voucher_key=voucher_key,
-                    survey_keys=(decision.target_key,),
+                    survey_keys=tuple(
+                        dict.fromkeys(mention.survey_key for mention in mentions)
+                    ),
                     mention_keys=tuple(item.key for item in mentions),
                     method=VoucherMatchMethod.MANUAL,
                     sources=tuple(
@@ -556,7 +568,8 @@ def _apply_voucher_decision(
                 existing,
                 survey_keys=tuple(
                     dict.fromkeys(
-                        existing.survey_keys + (decision.target_key,)
+                        existing.survey_keys
+                        + tuple(mention.survey_key for mention in mentions)
                     )
                 ),
                 mention_keys=tuple(evidence_by_mention),
@@ -623,7 +636,7 @@ def _resolve_related_issues(
         def is_covered(issue: Issue) -> bool:
             return bool(affected.intersection(issue.affected_keys))
 
-        codes = _PERSON_ISSUE_CODES
+        codes = PERSON_DECISION_ISSUE_CODES
 
     resolution = (
         None

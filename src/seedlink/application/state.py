@@ -22,6 +22,7 @@ class SessionStatus(StrEnum):
 class OperationPhase(StrEnum):
     IMPORTING = "importing"
     MATCHING = "matching"
+    EXPORTING = "exporting"
     APPLYING_DECISIONS = "applying_decisions"
     CALCULATING = "calculating"
     COMPLETED = "completed"

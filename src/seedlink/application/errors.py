@@ -19,6 +19,7 @@ class SessionErrorCode(StrEnum):
     STALE_OPERATION = "STALE_OPERATION"
     EXPORT_REVISION_MISMATCH = "EXPORT_REVISION_MISMATCH"
     INTERNAL_COMMAND_STATE = "INTERNAL_COMMAND_STATE"
+    EXPORT_IO_FAILED = "EXPORT_IO_FAILED"
 
 
 class SessionError(RuntimeError):
@@ -42,6 +43,10 @@ class SessionStateError(SessionError):
 
 
 class DecisionValidationError(SessionError):
+    pass
+
+
+class ExportError(SessionError):
     pass
 
 
