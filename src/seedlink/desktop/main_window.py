@@ -6,8 +6,7 @@ from dataclasses import replace
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QEventLoop, QTimer, QUrl, Qt, Slot
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QEventLoop, QTimer, Qt, Slot
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -60,6 +59,7 @@ from seedlink.domain.queries import (
     query_product_lines,
 )
 from seedlink.desktop.async_commands import AsyncCommandController
+from seedlink.desktop.external_open import open_local_path_detached
 from seedlink.desktop.table_models import Column, ObjectTableModel
 from seedlink.desktop.manual_review import (
     DecisionRequest,
@@ -1136,7 +1136,7 @@ class SeedLinkMainWindow(QMainWindow):
             )
             self._refresh_actions()
             return
-        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve()))):
+        if not open_local_path_detached(path):
             QMessageBox.warning(
                 self,
                 "Не вдалося відкрити",
